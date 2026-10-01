@@ -135,12 +135,64 @@ Install the CLI from a published module version, without cloning the repository:
 
 ```bash
 go install github.com/sung2708/DBVault/cmd/dbvault@latest
+```
+
+**Add Go's binary directory to `PATH` after installation.** `go install` places
+`dbvault` (`dbvault.exe` on Windows) in `GOBIN`, or `GOPATH/bin` when `GOBIN` is
+unset; it does not update `PATH` automatically. If you see `command not found`
+or `The term 'dbvault' is not recognized`, follow the steps below.
+
+**Windows (PowerShell):** Save the directory in your user PATH and make it
+available in the current terminal:
+
+```powershell
+$goBin = (go env GOBIN).Trim()
+if (-not $goBin) {
+    $goBin = Join-Path ((go env GOPATH) -split [IO.Path]::PathSeparator)[0] 'bin'
+}
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if (($userPath -split ';') -notcontains $goBin) {
+    [Environment]::SetEnvironmentVariable('Path', "$goBin;$userPath", 'User')
+}
+if (($env:Path -split ';') -notcontains $goBin) {
+    $env:Path = "$goBin;$env:Path"
+}
+```
+
+**Linux / macOS (Bash or Zsh):** Determine the directory and add it to the
+current terminal's PATH:
+
+```bash
+go_bin="$(go env GOBIN)"
+if [ -z "$go_bin" ]; then
+    go_path="$(go env GOPATH)"
+    go_bin="${go_path%%:*}/bin"
+fi
+export PATH="$go_bin:$PATH"
+```
+
+To keep it available in new terminals, run the command for your shell once:
+
+```bash
+# Bash
+printf '\nexport PATH=%q:"$PATH"\n' "$go_bin" >> "$HOME/.bashrc"
+
+# Zsh (the default shell on modern macOS)
+printf '\nexport PATH=%q:"$PATH"\n' "$go_bin" >> "$HOME/.zshrc"
+```
+
+Bash login shells must also load `~/.bashrc` from their login profile for that
+setting to apply. Other shells require their own PATH configuration.
+
+Verify installation after updating PATH:
+
+```text
 dbvault --help
 dbvault version
 ```
 
-Use `@vX.Y.Z` instead of `@latest` to pin an actual published tag. Add `GOBIN`
-(or `$(go env GOPATH)/bin` when unset) to `PATH`. This installs DBVault only;
+Use `@vX.Y.Z` instead of `@latest` to pin an actual published tag.
+This installs DBVault only;
 native PostgreSQL/MySQL/MongoDB tools are separate prerequisites. The current
 working-tree changes become available through this command after maintainers
 publish them; no release is created by this work.
