@@ -21,11 +21,13 @@ Before using DBVault, ensure the following requirements are met on your host mac
    ```bash
    go version
    ```
-2. **Native Database Client Binaries** installed and accessible in your system `PATH`:
+2. **Native Database Client Binaries** for PostgreSQL, MySQL or MongoDB. `dbvault init`
+   discovers them in `PATH` and supported known installation locations and saves
+   their paths. You can also provide a complete installation with `--native-tool-dir`:
    - For PostgreSQL: `pg_dump`, `pg_restore`, `psql`
    - For MySQL: `mysqldump`, `mysql`
 
-Verify native client presence:
+To inspect tools manually (optional):
 ```bash
 # Check PostgreSQL client tools
 pg_dump --version
@@ -91,7 +93,8 @@ variable is unset; that password is not saved or exported. Set the variable
 before using the generated config later. Cloud credentials use native SDK chains.
 
 For MongoDB, stop application writes throughout backup and explicitly acknowledge
-`quiesced`; setup does not stop writes. Native tools are checked only when testing.
+`quiesced`; setup does not stop writes. Native tools are discovered during setup;
+`--test` additionally checks database connectivity and server/tool compatibility.
 If testing fails, interactive setup can still save the config with explicit approval.
 
 Flags skip corresponding questions. Complete required flags skip the wizard:
@@ -108,6 +111,12 @@ After creation, run `dbvault doctor` to check the authenticated database
 connection, required client tools and storage access. Cloud checks verify list/read
 access only; doctor never writes or deletes cloud objects and never sends a Slack
 message. Use `dbvault doctor --json` for automation.
+
+Use `dbvault status` for a fast overview of recent backup metadata, freshness,
+recovery evidence, storage and saved schedules. It does not verify archive bytes
+or run a recovery drill. Use `dbvault health --verify` for an active checksum
+check, and `dbvault recovery drill` when you want to test an isolated SQLite
+recovery.
 
 ### Manual
 
@@ -146,14 +155,18 @@ compression:
 
 ## 4. Setting Authentication Secrets
 
-Set the password environment variable referenced in `password_env`:
+`dbvault init` displays the right command for the selected operating system. Set
+the password variable named by `password_env` in the same terminal where DBVault
+will run:
 
 ```bash
-# On Linux/macOS:
-export DB_PASSWORD="mysecretpassword"
+# On Linux/macOS (hidden input, current shell):
+read -s DB_PASSWORD; export DB_PASSWORD; echo
 
-# On Windows (PowerShell):
-$env:DB_PASSWORD="mysecretpassword"
+# On Windows PowerShell (masked input, current session):
+$secure = Read-Host 'Database password' -AsSecureString
+$env:DB_PASSWORD = [System.Net.NetworkCredential]::new('', $secure).Password
+Remove-Variable secure
 ```
 
 > [!SECURITY]
@@ -254,10 +267,10 @@ dbvault restore \
 
 ## 9. Common First-Run Errors and Fixes
 
-### Error 1: `pg_dump not found in PATH`
-- **Symptom:** `[ERROR] failed to locate native tool 'pg_dump' in PATH`.
-- **Cause:** PostgreSQL client utilities are not installed or not in your current shell's PATH.
-- **Fix:** Install PostgreSQL client tools:
+### Error 1: PostgreSQL tools unavailable
+- **Symptom:** DBVault cannot resolve a required PostgreSQL executable.
+- **Cause:** Client utilities are missing or installed in a location DBVault does not discover automatically.
+- **Fix:** Install PostgreSQL client tools and re-run `dbvault init`, or pass `--native-tool-dir` with the installation's `bin` directory.
   - Ubuntu/Debian: `sudo apt-get install postgresql-client`
   - macOS (Homebrew): `brew install libpq && brew link --force libpq`
   - Windows: Add `C:\Program Files\PostgreSQL\<version>\bin` to your System Environment `Path`.

@@ -11,6 +11,7 @@ import (
 	"github.com/sung2708/DBVault/internal/database"
 	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/fault"
+	"github.com/sung2708/DBVault/internal/toolresolve"
 )
 
 type Adapter struct {
@@ -39,8 +40,12 @@ func (b *bounded) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func (a *Adapter) capture(ctx context.Context, tool string, args ...string) (string, error) {
+	path, err := toolresolve.Resolve(tool, a.Config.Tools[tool], a.Runner)
+	if err != nil {
+		return "", err
+	}
 	b := &bounded{}
-	err := a.Runner.Run(ctx, runner.Spec{Executable: tool, Args: args, Env: a.env(), UnsetEnv: []string{"PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR"}, Stdout: b})
+	err = a.Runner.Run(ctx, runner.Spec{Executable: path, Args: args, Env: a.env(), UnsetEnv: []string{"PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR"}, Stdout: b})
 	return strings.TrimSpace(string(b.data)), err
 }
 func Major(tool string) (int, error) {
@@ -55,12 +60,34 @@ func Major(tool string) (int, error) {
 	}
 	return 0, fmt.Errorf("unrecognized PostgreSQL tool version")
 }
+func ValidateToolVersions(dump, restore, psql string) error {
+	d, e := Major(dump)
+	if e != nil {
+		return fmt.Errorf("invalid pg_dump version: %w", e)
+	}
+	r, e := Major(restore)
+	if e != nil {
+		return fmt.Errorf("invalid pg_restore version: %w", e)
+	}
+	p, e := Major(psql)
+	if e != nil {
+		return fmt.Errorf("invalid psql version: %w", e)
+	}
+	if p != d || r < d {
+		return fmt.Errorf("pg_dump and psql majors must match, and pg_restore must be at least as new as pg_dump")
+	}
+	return nil
+}
 func (a *Adapter) Preflight(ctx context.Context) (database.Info, error) {
 	info := database.Info{}
+	psqlToolVersion := ""
+	paths := make([]string, 0, 3)
 	for _, tool := range []string{"pg_dump", "pg_restore", "psql"} {
-		if _, err := a.Runner.LookPath(tool); err != nil {
+		path, err := toolresolve.Resolve(tool, a.Config.Tools[tool], a.Runner)
+		if err != nil {
 			return info, err
 		}
+		paths = append(paths, path)
 		v, err := a.capture(ctx, tool, "--version")
 		if err != nil {
 			return info, fault.Wrap(fault.Dependency, "discover "+tool+" version", err)
@@ -71,6 +98,15 @@ func (a *Adapter) Preflight(ctx context.Context) (database.Info, error) {
 		if tool == "pg_restore" {
 			info.RestoreToolVersion = v
 		}
+		if tool == "psql" {
+			psqlToolVersion = v
+		}
+	}
+	if err := ValidateToolVersions(info.ToolVersion, info.RestoreToolVersion, psqlToolVersion); err != nil {
+		return info, fault.Wrap(fault.Unsupported, "PostgreSQL tool compatibility", err)
+	}
+	if err := toolresolve.SameToolchain(paths); err != nil {
+		return info, fault.Wrap(fault.Dependency, "PostgreSQL toolchain", err)
 	}
 	version, err := a.capture(ctx, "psql", "--no-psqlrc", "--no-password", "--tuples-only", "--no-align", "--set=ON_ERROR_STOP=1", "--command=SHOW server_version_num")
 	if err != nil {
@@ -98,7 +134,11 @@ func (a *Adapter) Dump(ctx context.Context, w io.Writer) error {
 	for _, t := range a.Config.Options.ExcludeTables {
 		args = append(args, "--exclude-table="+t)
 	}
-	return a.Runner.Run(ctx, runner.Spec{Executable: "pg_dump", Args: args, Env: a.env(), UnsetEnv: []string{"PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR"}, Stdout: w})
+	p, err := toolresolve.Resolve("pg_dump", a.Config.Tools["pg_dump"], a.Runner)
+	if err != nil {
+		return err
+	}
+	return a.Runner.Run(ctx, runner.Spec{Executable: p, Args: args, Env: a.env(), UnsetEnv: []string{"PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR"}, Stdout: w})
 }
 func (a *Adapter) Restore(ctx context.Context, r io.Reader, o database.RestoreOptions) error {
 	if len(o.Collections) > 0 {
@@ -114,7 +154,11 @@ func (a *Adapter) Restore(ctx context.Context, r io.Reader, o database.RestoreOp
 	for _, s := range o.Schemas {
 		args = append(args, "--schema="+s)
 	}
-	return a.Runner.Run(ctx, runner.Spec{Executable: "pg_restore", Args: args, Env: a.env(), UnsetEnv: []string{"PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR"}, Stdin: r, Stdout: io.Discard})
+	p, err := toolresolve.Resolve("pg_restore", a.Config.Tools["pg_restore"], a.Runner)
+	if err != nil {
+		return err
+	}
+	return a.Runner.Run(ctx, runner.Spec{Executable: p, Args: args, Env: a.env(), UnsetEnv: []string{"PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR"}, Stdin: r, Stdout: io.Discard})
 }
 func (a *Adapter) Compatible(target database.Info, sourceServer, sourceTool string) error {
 	src, err := strconv.Atoi(sourceServer)

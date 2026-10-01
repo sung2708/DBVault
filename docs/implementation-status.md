@@ -1,6 +1,6 @@
 # Verified implementation status
 
-Release snapshot `v0.2.0`, prepared on branch develop, 2026-10-01. Binary archives
+Release snapshot `v0.3.0`, prepared on branch develop, 2026-10-02. Binary archives
 are published by the tag-triggered workflow; Docker images are not published.
 
 ## Guided setup (`v0.2.0`)
@@ -42,7 +42,93 @@ delivery are deliberately not exercised. Local storage probes use a temporary
 file that is removed. The report is available as human text or JSON; failed checks
 return exit code 1 while warnings remain advisory.
 
+### Protection overview (`dbvault status`, `v0.3.0`)
+
+Status composes the current health report with up to five validated recent backup
+manifests, exact-backup recovery evidence, storage type and matching saved
+schedules. It does not connect to a database or read archive bytes. No separate
+Protection Policy evaluator exists, so the field reports `not_configured` rather
+than inferring general policy satisfaction. Integrity comes from immutable
+stored-artifact verification records; absent exact-backup evidence remains
+unknown unless an immediate metadata/listed-size failure is found.
+Unreadable schedule state is a partial warning; saved schedules never imply a
+live daemon. JSON, narrow terminal, redirected output and deterministic relative
+times are covered by tests.
+
 ## Implemented scope
+
+### Backup operational health (`v0.3.0`)
+
+`dbvault health` evaluates the latest validated completed manifest matching the
+single configured engine/database. Explicit `health.max_backup_age` controls
+staleness; no default or inferred cron SLA is applied. Default checks read
+sidecars/existence/listed size without opening archives. `--verify` reuses the
+streaming integrity service for the candidate only. Verification state uses the latest immutable exact-backup record created by
+`verify`, `health --verify` or configured post-backup verification; absent history
+remains unknown. Restore-test state is unknown unless validated recovery records match the exact
+selected backup identity/checksum. JSON, quiet/plain output, typed operational
+errors and nonzero warning/critical/unknown monitoring results are supported.
+Saved schedule definitions are advisory and never establish daemon liveness.
+
+Coverage includes fixed-clock boundaries/timezones, future timestamps, fresh,
+stale and absent backups, invalid sidecars, missing/size-mismatched/corrupt
+artifacts, registry matching, cheap default reads, storage failures/cancellation,
+schedule enabled/disabled state, configuration validation and terminal/JSON modes.
+
+### Verify after backup (`v0.3.0`)
+
+`protection.verify_after_backup: true` reads the registered stored artifact back
+through the existing streaming SHA-256/size verifier after the immutable manifest
+is published. A separate create-only JSON record carries the backup ID/name/hash,
+engine/database, outcome, byte count, completion timestamp and bounded failure
+category. Verification failures return nonzero without deleting the archive.
+The same records are consumed by Health and Status. Cloud reads are full-object
+reads and may incur time, API and egress cost. None of this is restore evidence.
+
+Unit fixtures cover stored-byte corruption, read failure, evidence-write failure,
+cancellation with evidence persistence, bounded streaming, Health/Status and JSON.
+Cloud emulator integration exercises the option through S3, GCS and Azure.
+
+### Safe recovery drill (`v0.3.0`)
+
+The operator-facing `recovery drill` supports SQLite through a new explicitly
+isolated file, using existing verified snapshot/restore machinery and read-only
+structural/catalog validation. Confirmation, dry-run, owned successful-run-only
+cleanup, failure preservation and separate immutable recovery records are
+implemented. Health reads exact-backup records without claiming current checksum
+verification or collapsing recovery/freshness into a single status.
+
+| Capability | PostgreSQL | MySQL | MongoDB | SQLite |
+|---|---|---|---|---|
+| Safe Recovery Drill CLI | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED | SUPPORTED |
+
+SQLite real database/CLI fixtures pass for all codecs, with source protection,
+exact data comparison and post-restore validation. Native engines fail closed
+until proven target/credential isolation and corresponding actual drills exist;
+previous native restore test-harness evidence does not imply new CLI support.
+
+### Native tool discovery during setup (`v0.3.0`)
+
+`dbvault init` now resolves a complete PostgreSQL/MySQL/MongoDB toolchain from
+PATH or bounded known installation directories (including versioned PostgreSQL
+Windows/Linux locations), probes each executable, checks toolset version
+consistency, and saves absolute paths in `database.tools`. `--native-tool-dir`
+selects an explicit complete installation. Operational adapters share the same
+resolver, so doctor/test/backup/restore use saved paths. SQLite remains embedded.
+Discovery is bounded: Windows checks immediate PostgreSQL/MySQL/MongoDB Tools
+version directories under Program Files; Linux checks PATH, `/usr/bin`,
+`/usr/local/bin`, and versioned `/usr/lib/postgresql` directories; macOS checks
+PATH and common Homebrew/Postgres.app locations. Other custom locations use
+`--native-tool-dir`.
+
+Verified on Windows with Docker on 2026-10-01: the full expanded integration
+suite passed for PostgreSQL 16, MySQL 8.4, MongoDB 8.0 and SQLite with none/gzip/
+zstd, including health checks against actual completed backups and existing
+full/selected restore dataset checks. SQLite recovery drills also passed through
+S3 (LocalStack 4.7.0), GCS (fake-gcs-server 1.56.1) and Azure (Azurite 3.35.0),
+including explicit cleanup and persisted exact-backup health evidence. Unit
+fixtures cover target replacement before restore and age crossing the stale
+threshold during verification. Windows symlink tests require host privileges.
 
 | Area | Implementation | Evidence |
 |---|---|---|

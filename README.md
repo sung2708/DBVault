@@ -18,7 +18,7 @@
 
 > [!IMPORTANT]
 > **Audit Note (Current Implementation State):**
-> The repository contains working **PostgreSQL, MySQL, MongoDB and SQLite adapters with local/S3/GCS/Azure storage** (`github.com/sung2708/DBVault`). Release `v0.2.0` adds guided setup, readiness diagnostics and update checks. See [verified status](docs/implementation-status.md) and [ADRs](docs/adr/README.md) for the implementation contract and test evidence.
+> The repository contains working **PostgreSQL, MySQL, MongoDB and SQLite adapters with local/S3/GCS/Azure storage** (`github.com/sung2708/DBVault`). Release `v0.3.0` adds backup health, status, optional post-backup verification, SQLite recovery drills and native database tool discovery. See [verified status](docs/implementation-status.md) and [ADRs](docs/adr/README.md) for the implementation contract and test evidence.
 >
 > Throughout this documentation:
 > - **Implemented**: Four adapters, four storage providers, none/gzip/zstd, SHA-256, metadata, verification, retention, destructive-operation guards, Slack and persistent cron schedules.
@@ -71,6 +71,8 @@ Key architectural tenets:
 | **Unified CLI Interface** | Implemented | Grouped help, command workflows/examples, actionable input errors and schedule subcommands |
 | **Guided configuration setup** | Implemented | `dbvault init` creates validated configuration interactively or with automation flags |
 | **Readiness diagnostics** | Implemented | `dbvault doctor` checks configuration, authenticated database/tool compatibility, storage access and temporary directory without creating backups or sending Slack messages |
+| **Protection overview** | Implemented | `dbvault status` summarizes existing backup health, metadata, recovery evidence, storage and saved schedules without hashing archives or running a drill |
+| **Recovery drill** | SQLite | `recovery drill` restores into a new isolated file and validates its structure; server engines fail closed |
 | **Update checks** | Implemented | `dbvault update check` compares the installed build with official stable releases and provides install instructions |
 | **PostgreSQL Adapter** | Implemented | Custom archive streaming via pg_dump; restore via pg_restore |
 | **MySQL Adapter** | Implemented | Oracle MySQL 8.x/InnoDB logical dumps; full SQL restore |
@@ -83,6 +85,7 @@ Key architectural tenets:
 | **Gzip Compression** | Implemented | Streaming compression with levels 1–9 |
 | **Zstandard (zstd) Compression** | Implemented | Streaming compression with bounded decoder memory |
 | **Integrity Checksums** | Implemented | SHA-256 over stored bytes; mandatory verification before restore |
+| **Post-backup verification** | Implemented | Optional `protection.verify_after_backup` reads stored bytes back and records immutable exact-backup evidence |
 | **Sidecar Metadata** | Implemented | Versioned JSON metadata; completed manifests register backups |
 | **Slack Notifications** | Implemented | HTTPS backup/restore completion and failure notifications |
 | **Cron Scheduling** | Implemented | Persistent definitions and supervised foreground daemon |
@@ -100,6 +103,7 @@ The following capability matrix reflects the verified implementation status acro
 | **Connection Test** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
 | **Full Backup** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
 | **Full Restore** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
+| **Safe Recovery Drill CLI** | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED | SUPPORTED |
 | **Selective Backup** | SUPPORTED | SUPPORTED | PARTIAL | UNSUPPORTED |
 | **Selective Restore** | SUPPORTED | UNSUPPORTED | SUPPORTED | UNSUPPORTED |
 | **Streaming Pipeline** | SUPPORTED | SUPPORTED | SUPPORTED | PARTIAL |
@@ -128,9 +132,11 @@ drills exercise PostgreSQL/MySQL/MongoDB. See the full
   - MongoDB: `mongodump`, `mongorestore` Database Tools 100.x
   - SQLite: embedded pure Go driver; no executable needed
 
-Go is needed to build from source. Native tools must be available in `PATH` when
-running the corresponding adapter. PostgreSQL dump tools must match the server
-major; Oracle MySQL clients must match its 8.x release series.
+Go is needed to build from source. `dbvault init` discovers native tools from
+`PATH` and supported platform installation locations, validates their versions
+and stores their paths in the generated config. Use `--native-tool-dir` to point
+at a complete tool installation explicitly. PostgreSQL dump tools must match the
+server major; Oracle MySQL clients must match its 8.x release series.
 
 ### Go Install
 
@@ -204,7 +210,7 @@ newer stable version is available.
 Maintainer-triggered releases package Linux amd64/arm64, macOS amd64/arm64 and
 Windows amd64 archives with `checksums.txt`. See the
 [release assets](https://github.com/sung2708/DBVault/releases) for published
-versions. Release `v0.2.0` is built and published by the tag-triggered workflow.
+versions. Releases are built and published by the tag-triggered workflow.
 
 ### Building from Source
 
@@ -268,7 +274,9 @@ dbvault help verify
 | Create a full backup | `backup` |
 | Find backup names and read metadata | `list`, `inspect` |
 | Check stored size and SHA-256 | `verify` |
+| Check freshness, availability and integrity evidence | `health`, `health --verify` |
 | Restore a verified backup | `restore` |
+| Test a SQLite backup through isolated restore and validation | `recovery drill` |
 | Delete one backup or apply retention | `delete`, `cleanup` |
 | Save schedules and run their foreground daemon | `schedule` |
 | Show version/build information | `version` |
@@ -390,6 +398,25 @@ atomic across all data; plan recovery accordingly.
 
 ## Configuration Example
 
+### Safe SQLite recovery drill
+
+Choose a **new** recovery file in an existing private directory. The command
+refuses production/source aliases, existing files and SQLite sidecars:
+
+```bash
+dbvault recovery drill --target backup.sqlite.gz --recovery-database ./recovery/new.sqlite --dry-run
+dbvault recovery drill --target backup.sqlite.gz --recovery-database ./recovery/new.sqlite --confirm
+```
+
+Use an actual name from `list`. Dry-run verifies/preflights without creating the
+target; it is not a passed drill. Actual runs reuse restore and then run SQLite
+`PRAGMA integrity_check` plus a catalog query. The target is kept by default;
+`--cleanup` removes only this run's file after successful validation. Failures
+preserve it for inspection. Separate `.recovery.json` records preserve evidence
+without changing backup manifests; health associates it by backup ID/name/hash.
+PostgreSQL, MySQL and MongoDB recovery drills are unsupported in V1 and fail
+before database writes. See [recovery drill](docs/cli-reference.md#dbvault-recovery-drill).
+
 DBVault separates configuration structure from secret storage. **Never place cleartext passwords in configuration files.**
 
 ```yaml
@@ -471,6 +498,24 @@ dbvault restore --config configs/example.yaml --target backup.dump.gz --confirm
 ```
 
 ### Backup Management
+
+Define an explicit freshness policy in the selected YAML config:
+
+```yaml
+health:
+  max_backup_age: 12h
+```
+
+`dbvault health` checks the latest registered backup for that database without
+reading archive contents. Fresh backups report warning when checksum verification
+history is unknown; `dbvault health --verify` actively checks the latest archive
+and records the result. `dbvault verify` and optional
+`protection.verify_after_backup: true` also record exact-backup SHA-256 evidence.
+Post-backup verification reads the full stored object and can add cloud API,
+bandwidth and egress costs. Stale or missing backups are critical; missing
+freshness policy is unknown. Verification is not a recovery drill.
+Exit 0 means healthy; warning/critical/unknown return 1. Use `--output json` for
+automation and `--quiet` for plain results. See [health semantics](docs/cli-reference.md#dbvault-health).
 
 ```bash
 dbvault list --limit 10

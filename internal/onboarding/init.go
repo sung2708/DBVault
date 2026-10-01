@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
 	"github.com/sung2708/DBVault/internal/config"
+	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/security"
 )
 
@@ -28,16 +30,18 @@ type Options struct {
 	PathProvided, Force, Test, TestProvided bool
 	Prompt                                  Prompter // nil means no terminal interaction is permitted
 	TestConnection                          func(context.Context, config.Config, string) error
+	DiscoverNativeTools                     func(context.Context, string, string) (map[string]string, error)
 }
 type Result struct {
-	Path            string `json:"config"`
-	Database        string `json:"database"`
-	DatabaseName    string `json:"database_name"`
-	Storage         string `json:"storage"`
-	StorageLocation string `json:"storage_location"`
-	Compression     string `json:"compression"`
-	PasswordEnv     string `json:"password_env,omitempty"`
-	Tested          bool   `json:"connection_verified"`
+	Path                 string `json:"config"`
+	Database             string `json:"database"`
+	DatabaseName         string `json:"database_name"`
+	Storage              string `json:"storage"`
+	StorageLocation      string `json:"storage_location"`
+	Compression          string `json:"compression"`
+	PasswordEnv          string `json:"password_env,omitempty"`
+	PasswordInstructions string `json:"password_instructions,omitempty"`
+	Tested               bool   `json:"connection_verified"`
 }
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -107,6 +111,33 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	}
 	if config.DefaultPort(c.Database.Type) == 0 && c.Database.Type != "sqlite" {
 		return result, fmt.Errorf("--database must be postgres, mysql, mongodb or sqlite")
+	}
+	if c.Database.Type != "sqlite" && o.DiscoverNativeTools != nil {
+		bin := o.Values["native-tool-dir"]
+		tools, discoverErr := o.DiscoverNativeTools(ctx, c.Database.Type, bin)
+		if discoverErr != nil && bin == "" && p != nil {
+			p.Message("Native database tools were not found automatically: " + discoverErr.Error())
+			bin, err = p.Input(ctx, "Native tool bin directory (leave empty to continue without saved tool paths)", "")
+			if err != nil {
+				return result, err
+			}
+			if bin != "" {
+				tools, discoverErr = o.DiscoverNativeTools(ctx, c.Database.Type, bin)
+			} else {
+				discoverErr = nil
+				p.Message("No native tool paths were saved. Install the database client tools and run dbvault init again, or configure database.tools manually.")
+			}
+		}
+		if discoverErr != nil {
+			return result, fault.Wrap(fault.Dependency, "discover native database tools", discoverErr)
+		}
+		c.Database.Tools = tools
+		if len(tools) > 0 && p != nil {
+			p.Message("Native tools detected and validated; DBVault will use these executable paths:")
+			for _, name := range nativeToolNames(c.Database.Type) {
+				p.Message("  " + name + "  " + tools[name])
+			}
+		}
 	}
 	nameTitle := "Database name"
 	if c.Database.Type == "sqlite" {
@@ -344,6 +375,9 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		return result, err
 	}
 	result.Path, result.Database, result.Storage, result.PasswordEnv = o.Path, c.Database.Type, c.Storage.Type, c.Database.PasswordEnv
+	if c.Database.Type != "sqlite" {
+		result.PasswordInstructions = PasswordEnvironmentInstructions(c.Database.PasswordEnv, runtime.GOOS)
+	}
 	result.DatabaseName, result.Compression = c.Database.Database, c.Compression.Type
 	switch c.Storage.Type {
 	case "local":
@@ -359,6 +393,9 @@ func Run(ctx context.Context, o Options) (Result, error) {
 }
 
 func applicableFlags(values map[string]string, c config.Config) error {
+	if _, ok := values["native-tool-dir"]; ok && c.Database.Type == "sqlite" {
+		return fmt.Errorf("--native-tool-dir does not apply to SQLite")
+	}
 	for _, key := range []string{"host", "port", "user", "password-env", "ssl-mode"} {
 		if _, supplied := values[key]; supplied && c.Database.Type == "sqlite" {
 			return fmt.Errorf("--%s does not apply to SQLite", key)
@@ -377,6 +414,32 @@ func applicableFlags(values map[string]string, c config.Config) error {
 		}
 	}
 	return nil
+}
+
+func nativeToolNames(engine string) []string {
+	switch engine {
+	case "postgres":
+		return []string{"pg_dump", "pg_restore", "psql"}
+	case "mysql":
+		return []string{"mysqldump", "mysql"}
+	case "mongodb":
+		return []string{"mongodump", "mongorestore"}
+	}
+	return nil
+}
+
+// PasswordEnvironmentInstructions prints only the name, never a password value.
+func PasswordEnvironmentInstructions(name, goos string) string {
+	var setup string
+	switch goos {
+	case "windows":
+		setup = fmt.Sprintf("PowerShell (masked prompt, this session):\n  $secure = Read-Host 'Database password' -AsSecureString\n  $env:%s = [System.Net.NetworkCredential]::new('', $secure).Password\n  Remove-Variable secure", name)
+	case "darwin", "linux":
+		setup = fmt.Sprintf("macOS/Linux (hidden prompt, this shell):\n  read -s %s; export %s; echo", name, name)
+	default:
+		setup = fmt.Sprintf("Set %s in your operating system environment before running DBVault.", name)
+	}
+	return fmt.Sprintf("DBVault reads the database password from environment variable %s; the value is never written to YAML. Set it in the same terminal before running DBVault:\n%s\nIf you enter a password only for the optional init connection test, that value is temporary; set this variable again before backup/restore.", name, setup)
 }
 
 // Summary never resolves a secret or dumps arbitrary YAML fields.

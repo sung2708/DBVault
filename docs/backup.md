@@ -4,6 +4,21 @@ This document details the internal lifecycle, streaming pipeline, data integrity
 
 ## Implemented contract
 
+`dbvault health` evaluates the latest completed registered backup for the selected
+database against optional `health.max_backup_age`. Freshness uses `created_at`
+(dump/snapshot start), not completion time. Exactly the age limit remains fresh;
+older backups are stale. Missing artifacts remain critical even when an older
+backup exists. Archives without valid completed sidecars are not registered backups.
+Default health reads metadata and checks existence/listed size; it does not hash
+archives. `health --verify` actively verifies the latest matching artifact only.
+`verify` and configured `protection.verify_after_backup` append immutable
+stored-artifact verification records, so health/status can distinguish verified,
+failed and unknown evidence for the exact latest backup. `recovery drill` provides separate evidence for SQLite through actual
+isolated restore and structural validation; health associates records with the
+exact selected backup ID/name/hash. Healthy backup does not mean a recovery drill
+has passed. See [health](cli-reference.md#dbvault-health) and
+[recovery drill](cli-reference.md#dbvault-recovery-drill).
+
 All engines use the same compression, checksum and registration pipeline.
 MySQL uses `.sql`, MongoDB `.archive`, and SQLite `.sqlite`, followed by the
 selected compression extension. MongoDB requires stopped writes and an explicit
@@ -41,7 +56,7 @@ Every backup operation executed by DBVault progresses through nine deterministic
          ↓
 2. Credential Resolution (Environment Variable Extraction)
          ↓
-3. Dependency Validation (Binary presence on PATH)
+3. Dependency Validation (configured, PATH-resolved or platform-discovered tools)
          ↓
 4. Connection Validation (Pre-flight Ping)
          ↓
@@ -54,6 +69,7 @@ Every backup operation executed by DBVault progresses through nine deterministic
 8. Storage Destination Write (Local filesystem / S3 Multipart)
          ↓
 9. Atomic Metadata Registration (.meta.json manifest generation)
+10. Optional Stored-Artifact Verification (read back + SHA-256 evidence record)
 ```
 
 ---
@@ -104,7 +120,16 @@ As compressed bytes pass through the pipeline, an `io.TeeReader` passes every by
 When the stream closes:
 - The SHA-256 hex digest is finalized.
 - The digest is embedded in the atomic sidecar metadata manifest (`.meta.json`).
+- This is the checksum calculated while writing; it does not establish that stored bytes can later be read.
+- `protection.verify_after_backup: true` reads the published artifact through the normal storage `Get` API, streams it through the shared SHA-256 verifier and appends a separate immutable verification record. It never rewrites the completed manifest.
 - When a restore command is issued, DBVault computes the checksum of the archive and compares it with this manifest before restoring data.
+
+Post-backup verification reads every stored byte. For cloud storage this adds a
+full object read after upload, which costs time and provider read/API charges and
+may incur network egress. If required verification fails, the command fails but
+keeps the registered artifact and records the outcome when storage permits.
+Verification proves stored-byte integrity, not that a database can be restored;
+only a recovery drill tests an actual restore.
 
 ---
 

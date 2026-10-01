@@ -12,6 +12,7 @@ import (
 	"github.com/sung2708/DBVault/internal/database"
 	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/fault"
+	"github.com/sung2708/DBVault/internal/toolresolve"
 )
 
 type Adapter struct {
@@ -44,8 +45,12 @@ func (b *bounded) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func (a *Adapter) capture(ctx context.Context, tool string, args []string) (string, error) {
+	path, err := toolresolve.Resolve(tool, a.Config.Tools[tool], a.Runner)
+	if err != nil {
+		return "", err
+	}
 	b := &bounded{}
-	err := a.Runner.Run(ctx, runner.Spec{Executable: tool, Args: args, Env: a.env(), Stdout: b})
+	err = a.Runner.Run(ctx, runner.Spec{Executable: path, Args: args, Env: a.env(), Stdout: b})
 	return strings.TrimSpace(string(b.data)), err
 }
 
@@ -61,12 +66,29 @@ func Series(v string) (string, error) {
 	}
 	return parts[1] + "." + parts[2], nil
 }
+func ValidateToolVersions(dump, client string) error {
+	d, e := Series(dump)
+	if e != nil {
+		return fmt.Errorf("invalid mysqldump version: %w", e)
+	}
+	c, e := Series(client)
+	if e != nil {
+		return fmt.Errorf("invalid mysql version: %w", e)
+	}
+	if d != c {
+		return fmt.Errorf("mysql and mysqldump must use the same Oracle MySQL 8.x release series")
+	}
+	return nil
+}
 func (a *Adapter) Preflight(ctx context.Context) (database.Info, error) {
 	info := database.Info{}
+	paths := make([]string, 0, 2)
 	for _, tool := range []string{"mysqldump", "mysql"} {
-		if _, err := a.Runner.LookPath(tool); err != nil {
+		path, err := toolresolve.Resolve(tool, a.Config.Tools[tool], a.Runner)
+		if err != nil {
 			return info, err
 		}
+		paths = append(paths, path)
 		v, err := a.capture(ctx, tool, []string{"--no-defaults", "--no-login-paths", "--version"})
 		if err != nil {
 			return info, fault.Wrap(fault.Dependency, "discover "+tool, err)
@@ -76,6 +98,12 @@ func (a *Adapter) Preflight(ctx context.Context) (database.Info, error) {
 		} else {
 			info.RestoreToolVersion = v
 		}
+	}
+	if err := toolresolve.SameToolchain(paths); err != nil {
+		return info, fault.Wrap(fault.Dependency, "MySQL toolchain", err)
+	}
+	if err := ValidateToolVersions(info.ToolVersion, info.RestoreToolVersion); err != nil {
+		return info, fault.Wrap(fault.Unsupported, "MySQL tool compatibility", err)
 	}
 	args := append(a.args(), "--connect-timeout=10", "--batch", "--skip-column-names", "--database="+a.Config.Database, "--execute=SELECT VERSION()")
 	v, err := a.capture(ctx, "mysql", args)
@@ -114,14 +142,22 @@ func (a *Adapter) Dump(ctx context.Context, w io.Writer) error {
 		}
 		args = append(args, table)
 	}
-	return a.Runner.Run(ctx, runner.Spec{Executable: "mysqldump", Args: args, Env: a.env(), Stdout: w})
+	p, err := toolresolve.Resolve("mysqldump", a.Config.Tools["mysqldump"], a.Runner)
+	if err != nil {
+		return err
+	}
+	return a.Runner.Run(ctx, runner.Spec{Executable: p, Args: args, Env: a.env(), Stdout: w})
 }
 func (a *Adapter) Restore(ctx context.Context, r io.Reader, o database.RestoreOptions) error {
 	if o.Clean || len(o.Tables) > 0 || len(o.Schemas) > 0 {
 		return fault.Wrap(fault.Unsupported, "MySQL restore selectors/clean", fmt.Errorf("restore the entire SQL artifact; selective restore and --clean are unsupported"))
 	}
 	args := append(a.args(), "--connect-timeout=10", "--binary-mode", "--batch", "--database="+a.Config.Database)
-	return a.Runner.Run(ctx, runner.Spec{Executable: "mysql", Args: args, Env: a.env(), Stdin: r, Stdout: io.Discard})
+	p, err := toolresolve.Resolve("mysql", a.Config.Tools["mysql"], a.Runner)
+	if err != nil {
+		return err
+	}
+	return a.Runner.Run(ctx, runner.Spec{Executable: p, Args: args, Env: a.env(), Stdin: r, Stdout: io.Discard})
 }
 func (a *Adapter) Compatible(target database.Info, sourceServer, sourceTool string) error {
 	src, err := Series(sourceServer)

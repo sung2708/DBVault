@@ -4,11 +4,33 @@ This document outlines DBVault's security model, threat landscape, mitigation co
 
 ## Implemented controls and limits
 
+Safe recovery drill V1 creates only a new isolated SQLite file, using resolved
+parent paths, exclusive creation, filesystem identity checks and separate
+immutable evidence records. Existing files/links/sidecars, production/source
+aliases and ambiguity fail closed; there is no force bypass. Cleanup is explicit,
+successful-run-only and refuses replaced files or remaining SQLite sidecars.
+Failed/cancelled targets are preserved. Parents and storage remain private to a
+trusted operator; this is not a sandbox against untrusted concurrent filesystem
+writers. Record fields contain no credentials/raw exception text and CLI record
+paths/names use configured-secret redaction. Records are not signed attestations.
+Drill history is tied to exact backup identity and checksum; invalid history
+never becomes positive health evidence. Native server-engine drills are refused
+until target/credential isolation is proved; arbitrary SQL validation hooks and
+automatic container orchestration are not supported. See [ADR-0010](adr/0010-safe-recovery-drills.md).
+
 The binary uses direct argv process execution,
 child-scoped PG/MYSQL credentials, centralized resolved-secret/credential-URL redaction, confined
 flat storage keys, strict metadata, mandatory stored-byte SHA-256, private restore
 snapshots, and `--confirm` guards. Nonempty `extra_flags`, connection-string
 database names and unsupported strategies fail explicitly.
+
+Optional post-backup verification reads the completed artifact through the normal
+storage API, streams it into the shared SHA-256 verifier and writes a separate
+small immutable record containing backup identity, checksum, outcome, byte count,
+timestamp and a bounded failure category. It does not mutate the manifest or
+persist exception text, credentials or signed URLs. Cloud verification performs
+a complete object read. Verification records are integrity evidence, not signed
+attestations; an actor able to replace both objects can forge them.
 
 PostgreSQL children remove inherited PGSERVICE, PGSERVICEFILE and PGHOSTADDR so
 libpq cannot redirect a configured host through an inherited service/address.

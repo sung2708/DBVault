@@ -17,3 +17,4 @@ This directory contains the Architecture Decision Records for DBVault. ADRs capt
 | [ADR-0007](0007-verified-local-foundation.md) | Verified local foundation and PostgreSQL archive contract | Accepted | 2026-10-01 |
 | [ADR-0008](0008-mysql-full-logical-strategy.md) | Oracle MySQL full logical strategy | Accepted | 2026-10-01 |
 | [ADR-0009](0009-mongodb-sqlite-cloud-scheduling.md) | MongoDB, SQLite, cloud, notifications and scheduling | Accepted | 2026-10-01 |
+| [ADR-0010](0010-safe-recovery-drills.md) | Fail-closed SQLite recovery drills and separate evidence | Accepted | 2026-10-01 |

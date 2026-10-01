@@ -2,6 +2,30 @@
 
 A backup is only as good as its proven ability to restore. This document details DBVault's restoration lifecycle, pre-flight safety validations, and recovery testing drills.
 
+## Safe operator-facing recovery drill (SQLite V1)
+
+`dbvault recovery drill --target NAME --recovery-database NEW-PATH --confirm`
+reuses the existing restore pipeline against an exclusively created SQLite file.
+It refuses existing targets, production/source aliases and ambiguous paths, then
+requires read-only `PRAGMA integrity_check` and a catalog query after restore.
+This is stronger evidence than `verify`, which only checks stored size/SHA-256.
+Validation covers SQLite structure, not application data semantics.
+
+`--dry-run` verifies/preflights without target creation and is not a passed drill.
+Targets are preserved by default and on failure/cancellation. Explicit `--cleanup`
+removes only the same file created by this invocation after successful validation;
+replacements/unexpected SQLite sidecars abort cleanup. Separate records associate
+evidence with the exact backup without altering immutable manifests. Missing
+production files do not prevent embedded-engine preflight, provided source parent
+is resolvable. No production safety bypass or shell validation hooks exist.
+
+PostgreSQL/MySQL/MongoDB operator-facing drills are **unsupported** in V1 and fail
+closed: current adapters do not prove isolated-server/credential ownership and
+SQL dumps/custom archives can contain executable SQL. Existing normal restore
+and previously executed test-harness drills remain available, with their existing
+confirmation contract. See [CLI semantics](cli-reference.md#dbvault-recovery-drill)
+and [ADR-0010](adr/0010-safe-recovery-drills.md).
+
 All adapters verify the exact compressed snapshot before writes. MySQL restores
 SQL through `mysql`; MongoDB restores native archives, supports `--collection`
 and namespace remapping, and requires matching server major/tools. Their restores

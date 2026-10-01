@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -76,6 +77,9 @@ func newWithUpdateService(b Build, out, errOut io.Writer, updates update.Service
 	root.AddCommand(o.initCommand())
 	root.AddCommand(o.updateCommand())
 	root.AddCommand(o.doctorCommand())
+	root.AddCommand(o.healthCommand(time.Now))
+	root.AddCommand(o.statusCommand(time.Now))
+	root.AddCommand(o.recoveryCommand())
 	root.InitDefaultHelpCmd()
 	for _, command := range root.Commands() {
 		if command.Name() == "help" {
@@ -270,14 +274,19 @@ func (o *options) run(c *cobra.Command, name string) error {
 		return o.output(c, info)
 	case "backup":
 		kind, _ := c.Flags().GetString("type")
-		m, err := svc.Backup(ctx, kind, dry)
+		result, err := svc.BackupWithResult(ctx, kind, dry)
 		if err != nil {
+			if result.Manifest.Name != "" {
+				if outputErr := o.output(c, result); outputErr != nil {
+					return errors.Join(err, outputErr)
+				}
+			}
 			return err
 		}
 		if dry {
 			return o.output(c, "Preflight passed; no backup created")
 		}
-		return o.output(c, m)
+		return o.output(c, result)
 	case "restore":
 		if !dry {
 			display.Warning("Restore may overwrite database data. Authorized by --confirm; stop application writes.")

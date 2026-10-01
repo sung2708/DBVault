@@ -11,11 +11,11 @@ import (
 func TestInitResultKeepsNextCommandsOnSeparateLines(t *testing.T) {
 	var out, stderr bytes.Buffer
 	r := New(&out, &stderr, Options{NoColor: true})
-	result := onboarding.Result{Path: `D:\configs\my config.yaml`, Database: "postgres", DatabaseName: "production", Storage: "local", StorageLocation: "./backups", Compression: "gzip", PasswordEnv: "DBVAULT_DB_PASSWORD"}
+	result := onboarding.Result{Path: `D:\configs\my config.yaml`, Database: "postgres", DatabaseName: "production", Storage: "local", StorageLocation: "./backups", Compression: "gzip", PasswordEnv: "DBVAULT_DB_PASSWORD", PasswordInstructions: "Set DBVAULT_DB_PASSWORD on this operating system"}
 	if err := r.Result("init", result); err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"Configuration created", "production", "Not tested", "\n  dbvault config --config ", "\n  dbvault test --config ", "\n  dbvault backup --config ", "DBVAULT_DB_PASSWORD"} {
+	for _, required := range []string{"Configuration created", "production", "Not tested", "\n  dbvault config --config ", "\n  dbvault test --config ", "\n  dbvault backup --config ", "DBVAULT_DB_PASSWORD", "Set DBVAULT_DB_PASSWORD on this operating system"} {
 		if !strings.Contains(out.String(), required) {
 			t.Fatal("missing readable setup output", required, out.String())
 		}

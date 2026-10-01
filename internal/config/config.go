@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/storage"
@@ -21,15 +23,16 @@ type Options struct {
 	Quiesced           bool     `yaml:"quiesced"`
 }
 type Database struct {
-	Type         string  `yaml:"type"`
-	Host         string  `yaml:"host"`
-	Port         int     `yaml:"port"`
-	User         string  `yaml:"user"`
-	PasswordEnv  string  `yaml:"password_env"`
-	Database     string  `yaml:"database"`
-	SSLMode      string  `yaml:"ssl_mode"`
-	AuthDatabase string  `yaml:"auth_database"`
-	Options      Options `yaml:"options"`
+	Type         string            `yaml:"type"`
+	Host         string            `yaml:"host"`
+	Port         int               `yaml:"port"`
+	User         string            `yaml:"user"`
+	PasswordEnv  string            `yaml:"password_env"`
+	Database     string            `yaml:"database"`
+	SSLMode      string            `yaml:"ssl_mode"`
+	AuthDatabase string            `yaml:"auth_database"`
+	Options      Options           `yaml:"options"`
+	Tools        map[string]string `yaml:"tools,omitempty"`
 }
 type Local struct {
 	Path        string `yaml:"path"`
@@ -73,6 +76,12 @@ type Retention struct {
 	KeepDays  int `yaml:"keep_days"`
 	KeepCount int `yaml:"keep_count"`
 }
+type Health struct {
+	MaxBackupAge string `yaml:"max_backup_age,omitempty"`
+}
+type Protection struct {
+	VerifyAfterBackup bool `yaml:"verify_after_backup,omitempty"`
+}
 type Slack struct {
 	Enabled    bool   `yaml:"enabled"`
 	WebhookEnv string `yaml:"webhook_url_env"`
@@ -84,6 +93,8 @@ type Config struct {
 	Storage       Storage     `yaml:"storage"`
 	Compression   Compression `yaml:"compression"`
 	Retention     Retention   `yaml:"retention"`
+	Health        Health      `yaml:"health,omitempty"`
+	Protection    *Protection `yaml:"protection,omitempty"`
 	Notifications struct {
 		Slack Slack `yaml:"slack"`
 	} `yaml:"notifications"`
@@ -173,6 +184,12 @@ func invalid(field, reason string) error {
 	return fault.Wrap(fault.Configuration, field, fmt.Errorf("%s", reason))
 }
 func (c Config) Validate() error {
+	if c.Health.MaxBackupAge != "" {
+		age, err := time.ParseDuration(c.Health.MaxBackupAge)
+		if err != nil || age <= 0 {
+			return invalid("health.max_backup_age", "must be a positive duration such as 12h or 168h")
+		}
+	}
 	if c.Version != "1" {
 		return invalid("version", "must be \"1\"")
 	}
@@ -209,6 +226,25 @@ func (c Config) Validate() error {
 		case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
 		default:
 			return invalid("database.ssl_mode", "invalid PostgreSQL TLS mode")
+		}
+	}
+	if len(c.Database.Tools) > 0 {
+		allowed := map[string]bool{}
+		switch c.Database.Type {
+		case "postgres":
+			allowed = map[string]bool{"pg_dump": true, "pg_restore": true, "psql": true}
+		case "mysql":
+			allowed = map[string]bool{"mysqldump": true, "mysql": true}
+		case "mongodb":
+			allowed = map[string]bool{"mongodump": true, "mongorestore": true}
+		}
+		for name, path := range c.Database.Tools {
+			if !allowed[name] {
+				return invalid("database.tools", "contains a tool that does not apply to the selected engine")
+			}
+			if path == "" || strings.ContainsAny(path, "\x00\r\n") || strings.TrimSpace(path) != path || strings.HasPrefix(path, "\"") || !filepath.IsAbs(path) {
+				return invalid("database.tools."+name, "must be an absolute executable path")
+			}
 		}
 	}
 	if c.Database.Type == "mysql" {

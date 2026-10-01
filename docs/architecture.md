@@ -12,6 +12,10 @@ database adapters expose explicit capabilities, Preflight returning server/tool
 versions, restore selectors and compatibility validation. The runner supports
 argv, isolated/removed environment entries, streaming stdin/stdout, bounded
 redacted stderr, exit errors and context cancellation.
+`internal/toolresolve` is the shared executable resolver: configured paths win,
+then PATH, then bounded known platform locations. `init` stores discovered
+absolute paths in `database.tools`; adapters, test, doctor, backup and restore
+consume those same paths. SQLite remains independent of external executables.
 
 `internal/cli` wires Cobra commands; `cmd/dbvault` handles build metadata, signals
 and exit status. `internal/app` coordinates adapters/providers. Backup is one-pass
@@ -34,7 +38,7 @@ timeout and cannot turn a successful backup into failure.
 DBVault is built as a single, statically linked binary designed to orchestrate database backup and restore operations with production reliability. The core architectural tenets are:
 
 1. **Zero Memory Spooling (Streaming First):** Databases can span gigabytes to terabytes. DBVault never loads dumps into system memory. All data flows through Go `io.Reader` and `io.Writer` streaming pipes with constant memory footprint ($O(1)$ RAM usage).
-2. **Subprocess Isolation & No Shell Execution:** DBVault executes native database binaries directly using Go's `os/exec.CommandContext` with structured argument vectors (`[]string`). It never spawns a shell interpreter (`sh -c` or `cmd.exe /c`), neutralizing all command injection vectors.
+2. **Subprocess Isolation & No Shell Execution:** DBVault executes resolved native database binaries directly using Go's `os/exec.CommandContext` with structured argument vectors (`[]string`). It never spawns a shell interpreter (`sh -c` or `cmd.exe /c`), preventing shell injection.
 3. **Defense-in-Depth Secret Protection:** Passwords, authentication keys, and API tokens are never accepted as command-line flags. They are resolved at runtime from environment variables and communicated to subprocesses via transient environment descriptors (e.g. `PGPASSWORD`, `MYSQL_PWD`) or secure temporary configuration files with restricted permissions.
 4. **End-to-End Cryptographic Integrity:** All backup streams compute a streaming SHA-256 digest on the fly. The digest is stored in an atomic sidecar metadata file and strictly validated before any restore procedure begins.
 5. **Fail-Safe Cleanup & Cancellation:** All operations take a Go `context.Context`. If an operation is canceled (via `SIGINT`, `SIGTERM`, or timeout), child processes are immediately terminated, and any partial or corrupted backup artifacts are safely pruned.
@@ -147,7 +151,7 @@ type Adapter interface {
 	// Ping validates connection credentials and connectivity to the database.
 	Ping(ctx context.Context) error
 
-	// ValidateEnvironment ensures required native client tools (e.g., pg_dump) are available on PATH.
+	// Preflight resolves required native tools and validates tool/server compatibility.
 	ValidateEnvironment(ctx context.Context) error
 
 	// Dump initiates a streaming logical backup writing directly to the provided io.Writer.
@@ -236,7 +240,7 @@ sequenceDiagram
     participant Meta as Metadata Registry
 
     User->>App: Execute Backup (config)
-    App->>DB: ValidateEnvironment() [checks PATH for tool]
+    App->>DB: Preflight() [shared native-tool resolver + compatibility]
     DB-->>App: Tools OK
     App->>DB: Ping(ctx) [validates connection]
     DB-->>App: Connection verified

@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -20,6 +22,7 @@ import (
 	"github.com/sung2708/DBVault/internal/onboarding"
 	"github.com/sung2708/DBVault/internal/presentation"
 	"github.com/sung2708/DBVault/internal/security"
+	"github.com/sung2708/DBVault/internal/toolresolve"
 )
 
 // databaseAdapter is shared by operational commands and setup's connection test.
@@ -40,7 +43,7 @@ func databaseAdapter(cfg config.Config, password string, redactor *security.Reda
 func (o *options) initCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use: "init", Short: "Create a configuration with guided setup or flags", GroupID: "configuration", Args: noPositionalArgs,
-		Long:    "Initialize DBVault configuration using the runtime YAML schema.\nOn a terminal, missing values are prompted with inline keyboard controls.\nComplete flags skip the wizard; --non-interactive, JSON and non-TTY input never prompt.\nPasswords are referenced by environment variable and never saved.\nExisting files require explicit overwrite approval or --force.\nThe default destination is dbvault.yaml in the current directory.\nUse config to validate an existing file; test checks database tools/connectivity.",
+		Long:    "Initialize DBVault configuration using the runtime YAML schema.\nOn a terminal, missing values are prompted with inline keyboard controls.\nComplete flags skip the wizard; --non-interactive, JSON and non-TTY input never prompt.\nNative database tools are discovered and saved when available.\nPasswords are referenced by environment variable and never saved.\nExisting files require explicit overwrite approval or --force.\nThe default destination is dbvault.yaml in the current directory.\nUse config to validate an existing file; test checks database tools/connectivity.",
 		Example: "  dbvault init\n  dbvault init --database postgres --storage local\n  dbvault init --non-interactive --database postgres --database-name production --user dbvault --storage local\n  dbvault init --non-interactive --database sqlite --database-name ./app.db --storage local --config ./dbvault.yaml",
 	}
 	f := c.Flags()
@@ -52,6 +55,7 @@ func (o *options) initCommand() *cobra.Command {
 		{"output-dir", "Local backup directory (default: ./backups)"}, {"bucket", "S3/GCS bucket; must already exist"}, {"region", "AWS region; required for S3"},
 		{"container", "Azure container; must already exist"}, {"account-name", "Azure storage account name"}, {"prefix", "Cloud object prefix (default: empty)"},
 		{"compression", "Compression: gzip, zstd, none (default: configuration default)"},
+		{"native-tool-dir", "Explicit directory containing all required native tools for the selected database engine"},
 	} {
 		f.String(flag.name, "", flag.help)
 	}
@@ -101,6 +105,13 @@ func (o *options) initCommand() *cobra.Command {
 				_, err = (&app.Service{Config: cfg, DB: adapter}).Test(ctx)
 				return redactor.Error(err)
 			},
+			DiscoverNativeTools: func(ctx context.Context, engine, dir string) (map[string]string, error) {
+				passwordEnv := values["password-env"]
+				if passwordEnv == "" {
+					passwordEnv = "DBVAULT_DB_PASSWORD"
+				}
+				return discoverNativeTools(ctx, engine, dir, passwordEnv)
+			},
 		})
 		if err != nil {
 			return o.redactor.Error(err)
@@ -108,6 +119,71 @@ func (o *options) initCommand() *cobra.Command {
 		return o.output(c, result)
 	}
 	return c
+}
+
+func discoverNativeTools(ctx context.Context, engine, dir, passwordEnv string) (map[string]string, error) {
+	var tools map[string]string
+	var err error
+	if dir == "" {
+		tools, err = toolresolve.Discover(engine)
+	} else {
+		tools, err = toolresolve.DiscoverInDirectory(engine, dir)
+	}
+	if err != nil {
+		return nil, err
+	}
+	versions := make(map[string]string, len(tools))
+	for _, name := range onboardingNativeToolNames(engine) {
+		path := tools[name]
+		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		out := &boundedToolOutput{}
+		err = (runner.Native{}).Run(probeCtx, runner.Spec{Executable: path, Args: []string{"--version"}, Stdout: out, UnsetEnv: []string{passwordEnv, "DBVAULT_DB_PASSWORD", "DB_PASSWORD", "PGPASSWORD", "MYSQL_PWD", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "AZURE_CLIENT_SECRET", "AZURE_STORAGE_KEY", "SLACK_WEBHOOK_URL"}})
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("validate %s at %s: %w", name, path, err)
+		}
+		if strings.TrimSpace(out.String()) == "" {
+			return nil, fmt.Errorf("%s at %s returned no version information", name, path)
+		}
+		versions[name] = strings.TrimSpace(out.String())
+	}
+	if err := validateToolVersions(engine, versions); err != nil {
+		return nil, err
+	}
+	return tools, nil
+}
+
+type boundedToolOutput struct{ bytes.Buffer }
+
+func (b *boundedToolOutput) Write(p []byte) (int, error) {
+	if b.Len()+len(p) > 64<<10 {
+		return 0, fmt.Errorf("native tool version output exceeds 64 KiB")
+	}
+	return b.Buffer.Write(p)
+}
+
+func onboardingNativeToolNames(engine string) []string {
+	switch engine {
+	case "postgres":
+		return []string{"pg_dump", "pg_restore", "psql"}
+	case "mysql":
+		return []string{"mysqldump", "mysql"}
+	case "mongodb":
+		return []string{"mongodump", "mongorestore"}
+	}
+	return nil
+}
+
+func validateToolVersions(engine string, versions map[string]string) error {
+	switch engine {
+	case "postgres":
+		return postgres.ValidateToolVersions(versions["pg_dump"], versions["pg_restore"], versions["psql"])
+	case "mysql":
+		return mysql.ValidateToolVersions(versions["mysqldump"], versions["mysql"])
+	case "mongodb":
+		return mongodb.ValidateToolVersions(versions["mongodump"], versions["mongorestore"])
+	}
+	return nil
 }
 
 func setupRedactor(env string, additional ...string) *security.Redactor {

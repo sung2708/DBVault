@@ -124,3 +124,13 @@ scope. Metadata is registered last; an upload without its manifest is not a
 completed backup. A process crash can leave an unregistered object for an
 operator to inspect and remove. See [ADR-0009](adr/0009-mongodb-sqlite-cloud-scheduling.md)
 for tested guarantees and live-cloud verification limits.
+
+### Stored-artifact verification reads
+
+When `protection.verify_after_backup` is enabled, DBVault reads each published
+archive back through the provider after registering its manifest. S3, GCS and
+Azure therefore perform a full object read and incur the corresponding request,
+latency, bandwidth and possible egress costs. The verifier uses streamed stored
+bytes and the manifest SHA-256; provider ETags are not treated as SHA-256. Local
+storage also reopens and hashes the stored file instead of trusting only the
+digest calculated during upload.

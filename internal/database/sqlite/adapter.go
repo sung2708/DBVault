@@ -24,7 +24,7 @@ func (*Adapter) Name() string      { return "sqlite" }
 func (*Adapter) Format() string    { return "sqlite" }
 func (*Adapter) Extension() string { return ".sqlite" }
 func (*Adapter) Capabilities() database.Capabilities {
-	return database.Capabilities{ConnectionTest: true, FullBackup: true, FullRestore: true, StreamingBackup: false}
+	return database.Capabilities{ConnectionTest: true, FullBackup: true, FullRestore: true, StreamingBackup: false, RecoveryDrill: true}
 }
 func uri(path, mode string) string {
 	p := filepath.ToSlash(path)
@@ -112,6 +112,9 @@ func (a *Adapter) Restore(ctx context.Context, r io.Reader, o database.RestoreOp
 	err = src.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&check)
 	src.Close()
 	if err != nil || check != "ok" {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fault.Wrap(fault.Integrity, "validate SQLite image", fmt.Errorf("invalid SQLite snapshot"))
 	}
 	// Refuse automatic creation: restore targets must be deliberately initialized
@@ -168,4 +171,55 @@ func (a *Adapter) Compatible(target database.Info, sourceServer, sourceTool stri
 		return fmt.Errorf("only SQLite 3 snapshots are supported")
 	}
 	return nil
+}
+
+// ValidateRecovery checks the restored image read-only. It does not establish
+// application-specific business invariants or that every intended row was dumped.
+func (a *Adapter) ValidateRecovery(ctx context.Context) (database.RecoveryValidation, error) {
+	result := database.RecoveryValidation{Method: "SQLite PRAGMA integrity_check and sqlite_schema query"}
+	db, err := open(a.Config.Database, "ro")
+	if err != nil {
+		return result, err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, "PRAGMA integrity_check")
+	if err != nil {
+		return result, err
+	}
+	count := 0
+	for rows.Next() {
+		var check string
+		if err = rows.Scan(&check); err != nil {
+			rows.Close()
+			return result, err
+		}
+		if check != "ok" {
+			rows.Close()
+			return result, fault.Wrap(fault.Integrity, "validate restored SQLite database", fmt.Errorf("integrity_check did not pass"))
+		}
+		count++
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return result, err
+	}
+	if count != 1 {
+		return result, fmt.Errorf("integrity_check returned no reliable result")
+	}
+	err = db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").Scan(&result.Objects)
+	return result, err
+}
+
+// PreflightRecovery inspects the embedded engine without touching production or
+// the not-yet-created target. Actual restore still preflights the created file.
+func (a *Adapter) PreflightRecovery(ctx context.Context) (database.Info, error) {
+	info := database.Info{ToolVersion: "modernc.org/sqlite", RestoreToolVersion: "modernc.org/sqlite"}
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return info, err
+	}
+	defer db.Close()
+	err = db.QueryRowContext(ctx, "SELECT sqlite_version()").Scan(&info.ServerVersion)
+	return info, err
 }

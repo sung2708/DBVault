@@ -18,6 +18,28 @@ storage:
     path: backups
 `
 
+func TestHealthPolicy(t *testing.T) {
+	for _, value := range []string{"12h", "168h", "1h30m", "", "0", "-1h", "24d", "invalid", "999999999999h"} {
+		c, err := Load(write(t, example+"health:\n  max_backup_age: \""+value+"\"\n"), Overrides{})
+		valid := value == "12h" || value == "168h" || value == "1h30m" || value == ""
+		if (err == nil) != valid {
+			t.Fatalf("%q: %+v %v", value, c, err)
+		}
+	}
+}
+
+func TestVerifyAfterBackupPolicy(t *testing.T) {
+	for _, value := range []string{"true", "false"} {
+		c, err := Load(write(t, example+"protection:\n  verify_after_backup: "+value+"\n"), Overrides{})
+		if err != nil || c.Protection == nil || c.Protection.VerifyAfterBackup != (value == "true") {
+			t.Fatalf("%s: %+v %v", value, c.Protection, err)
+		}
+	}
+	if _, err := Load(write(t, example+"backup:\n  verify: true\n"), Overrides{}); err == nil {
+		t.Fatal("accepted duplicate/unrecognized backup verification setting")
+	}
+}
+
 func write(t *testing.T, text string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "config.yaml")
@@ -53,6 +75,23 @@ func TestLoadFailures(t *testing.T) {
 				t.Fatal("secret leaked")
 			}
 		})
+	}
+}
+
+func TestNativeToolPathsValidateAndRoundTrip(t *testing.T) {
+	valid := strings.Replace(example, "  database: original", "  database: original\n  tools:\n    pg_dump: 'C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe'\n    pg_restore: 'C:\\Program Files\\PostgreSQL\\18\\bin\\pg_restore.exe'\n    psql: 'C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe'", 1)
+	c, err := Load(write(t, valid), Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Database.Tools["pg_dump"] != `C:\Program Files\PostgreSQL\18\bin\pg_dump.exe` {
+		t.Fatalf("path changed: %q", c.Database.Tools["pg_dump"])
+	}
+	for _, tools := range []string{"    pg_dump: pg_dump.exe\n", "    mysql: /usr/bin/mysql\n", "    pg_dump: ' \\\\server\\share\\pg_dump.exe'\n"} {
+		text := strings.Replace(example, "  database: original", "  database: original\n  tools:\n"+tools, 1)
+		if _, err := Load(write(t, text), Overrides{}); err == nil {
+			t.Fatalf("accepted invalid tool configuration: %s", tools)
+		}
 	}
 }
 func TestSecretResolution(t *testing.T) {

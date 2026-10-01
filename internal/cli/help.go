@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/sung2708/DBVault/internal/app"
 	"github.com/sung2708/DBVault/internal/doctor"
 	"github.com/sung2708/DBVault/internal/fault"
 )
@@ -54,9 +55,9 @@ type commandHelp struct{ short, long, examples, group string }
 
 func applyCommandHelp(c *cobra.Command) {
 	h := map[string]commandHelp{
-		"backup":  {"Create a verified full database backup", "Back up the configured database to the configured storage backend.\nCompression comes from configuration unless overridden. Only full backups are\nsupported; table/collection backup filters are configured in YAML.\n\nUse --dry-run to check tools and connectivity without creating an archive.\nAfter backup, use list to find its name and verify to check stored bytes.", "  dbvault backup --dry-run\n  dbvault backup\n  dbvault backup --config production.yaml --compression zstd", "core"},
+		"backup":  {"Create a full database backup", "Back up the configured database to the configured storage backend.\nCompression comes from configuration unless overridden. Only full backups are\nsupported; table/collection backup filters are configured in YAML.\n\nUse --dry-run to check tools and connectivity without creating an archive.\nSet protection.verify_after_backup: true to stream-read the stored artifact and\nverify its SHA-256 after upload; remote providers incur a full read and bandwidth cost.\nThis verifies bytes, not recoverability. Otherwise use verify after backup as needed.", "  dbvault backup --dry-run\n  dbvault backup\n  dbvault backup --config production.yaml --compression zstd", "core"},
 		"restore": {"Restore a verified backup into a database", "Restore the backup selected by --target into the configured destination.\nGet the backup name from dbvault list (use the name, not the manifest ID).\nLocal storage also accepts paths inside its root; cloud storage accepts names.\n\nRestore can overwrite data. Stop application writes and preview with --dry-run;\nactual restore requires --confirm. Stored bytes are verified before any writes.\nSelected restore is available for PostgreSQL and MongoDB only.", "  dbvault list\n  # Replace backup.dump.gz with a backup name returned by list.\n  dbvault restore --target backup.dump.gz --dry-run\n  dbvault restore --target backup.dump.gz --confirm\n  dbvault restore --target backup.dump.gz --database recovery --confirm", "core"},
-		"verify":  {"Check stored backup integrity", "Read the selected archive and verify its size and SHA-256 against its manifest.\nUse a backup name from dbvault list for --target. No database connection or\ndatabase writes occur. To check destination compatibility, use restore --dry-run.", "  dbvault list\n  dbvault verify --target backup.dump.gz\n  dbvault verify --target backup.dump.gz --json", "core"},
+		"verify":  {"Check and record stored backup integrity", "Read the selected archive and verify its size and SHA-256 against its manifest.\nAn immutable verification evidence record is appended for health/status. Use a\nbackup name from dbvault list for --target. No database connection or database\nwrites occur. To check destination compatibility, use restore --dry-run.", "  dbvault list\n  dbvault verify --target backup.dump.gz\n  dbvault verify --target backup.dump.gz --json", "core"},
 		"inspect": {"Show backup metadata without reading the archive", "Show validated metadata for a backup name from dbvault list.\nThis does not verify archive bytes; run verify for an integrity check.", "  dbvault inspect --target backup.dump.gz\n  dbvault inspect --target backup.dump.gz --json", "core"},
 		"list":    {"List completed backups in configured storage", "List registered backups, including their names and metadata.\nUse a returned name with --target for inspect, verify, restore or delete.\nThe configured storage backend determines which backups are listed.", "  dbvault list\n  dbvault list --limit 10\n  dbvault list --prefix postgres --json", "core"},
 		"delete":  {"Delete one backup archive and its metadata", "Permanently delete a backup selected by --target from configured storage.\nUse a name from dbvault list. Preview with --dry-run; deletion requires --confirm.\nThis removes the archive and manifest, not data in the source database.", "  dbvault delete --target backup.dump.gz --dry-run\n  dbvault delete --target backup.dump.gz --confirm", "operations"},
@@ -120,6 +121,10 @@ func validateCLIValues(c *cobra.Command, _ []string) error {
 
 // WriteError retains the typed error for exit status; only presentation changes.
 func WriteError(w io.Writer, c *cobra.Command, err error) {
+	var health *app.HealthFailure
+	if errors.As(err, &health) {
+		return
+	} // The health result already explains the monitoring status.
 	var readiness *doctor.ReadinessError
 	if errors.As(err, &readiness) && !jsonMode(c) {
 		return

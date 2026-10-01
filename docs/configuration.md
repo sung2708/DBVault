@@ -14,6 +14,11 @@ defaults. It does not copy runtime environment overrides into the generated YAML
 those overrides still apply when loading the file for operations. The default
 password reference is `DBVAULT_DB_PASSWORD`. No plaintext secret is generated.
 The default compression remains gzip level 6. Only full backup is offered.
+For PostgreSQL, MySQL and MongoDB, `init` discovers a complete native toolset
+from `PATH` or supported platform locations and stores its absolute paths under
+`database.tools`. Existing YAML without that map stays valid and resolves tools
+from `PATH`/known locations at runtime. `--native-tool-dir` selects one complete
+installation explicitly; DBVault does not modify the system `PATH`.
 
 Config creation writes a private `0600` temporary file, flushes/closes it, and
 publishes a complete file with a no-overwrite hard link. Explicit `--force` or
@@ -65,6 +70,37 @@ the optional channel override; routing is controlled by the installed webhook.
 
 ## 1. Configuration Precedence
 
+### Backup freshness policy
+
+```yaml
+health:
+  max_backup_age: 12h
+```
+
+Optional `health.max_backup_age` is a positive Go duration, such as `30m`, `12h`,
+`168h` or `1h30m`; `d` suffixes, zero, negative and overflowing durations are
+rejected. Omitted/empty means no freshness expectation: health reports unknown
+unless concrete missing/corrupt backup evidence already makes it critical.
+The policy applies to the single configured database and has no environment or
+CLI override. Cron and retention settings do not supply an implicit policy.
+See [health](cli-reference.md#dbvault-health) for exact boundaries and exit codes.
+
+### Stored-artifact verification policy
+
+```yaml
+protection:
+  verify_after_backup: true
+```
+
+When enabled, every completed backup is read back from configured storage and
+stream-verified against the manifest's stored-byte count and SHA-256 before the
+command reports success. This does not restore the database. It appends an
+immutable verification record; the backup manifest remains unchanged. If reading
+or verification fails, DBVault returns failure while preserving the registered
+artifact and reports the verification outcome. The default is disabled. For S3,
+GCS and Azure, this reads the entire object after upload, adding time, read/API
+charges and potentially egress; enable it only when that tradeoff is intended.
+
 DBVault resolves configuration values using the following strict hierarchy (highest priority first):
 
 ```text
@@ -81,7 +117,7 @@ DBVault resolves configuration values using the following strict hierarchy (high
 
 ## 2. Configuration File Schema
 
-A complete `dbvault.yaml` file is structured into top-level sections: `version`, `database`, `storage`, `compression`, `retention`, and `notifications`.
+A complete `dbvault.yaml` file is structured into top-level sections: `version`, `database`, `storage`, `compression`, `retention`, optional `health`, optional `protection`, and `notifications`.
 
 ```yaml
 version: "1"
