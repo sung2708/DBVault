@@ -18,7 +18,7 @@
 
 > [!IMPORTANT]
 > **Audit Note (Current Implementation State):**
-> The repository contains working **PostgreSQL, MySQL, MongoDB and SQLite adapters with local/S3/GCS/Azure storage** (`github.com/sung2708/DBVault`). Release `v0.3.1` adds backup health, status, optional post-backup verification, SQLite recovery drills and native database tool discovery. See [verified status](docs/implementation-status.md) and [ADRs](docs/adr/README.md) for the implementation contract and test evidence.
+> The repository contains working **PostgreSQL, MySQL, MongoDB and SQLite adapters with local/S3/GCS/Azure storage** (`github.com/sung2708/DBVault`). Release `v0.3.0` adds backup health, status, optional post-backup verification, SQLite recovery drills and native database tool discovery. See [verified status](docs/implementation-status.md) and [ADRs](docs/adr/README.md) for the implementation contract and test evidence.
 >
 > Throughout this documentation:
 > - **Implemented**: Four adapters, four storage providers, none/gzip/zstd, SHA-256, metadata, verification, retention, destructive-operation guards, Slack and persistent cron schedules.

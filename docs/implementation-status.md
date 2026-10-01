@@ -1,6 +1,6 @@
 # Verified implementation status
 
-Release snapshot `v0.3.1`, prepared on branch develop, 2026-10-02. Binary archives
+Release snapshot `v0.3.0`, prepared on branch develop, 2026-10-02. Binary archives
 are published by the tag-triggered workflow; Docker images are not published.
 
 ## Guided setup (`v0.2.0`)
@@ -42,7 +42,7 @@ delivery are deliberately not exercised. Local storage probes use a temporary
 file that is removed. The report is available as human text or JSON; failed checks
 return exit code 1 while warnings remain advisory.
 
-### Protection overview (`dbvault status`, `v0.3.1`)
+### Protection overview (`dbvault status`, `v0.3.0`)
 
 Status composes the current health report with up to five validated recent backup
 manifests, exact-backup recovery evidence, storage type and matching saved
@@ -57,7 +57,7 @@ times are covered by tests.
 
 ## Implemented scope
 
-### Backup operational health (`v0.3.1`)
+### Backup operational health (`v0.3.0`)
 
 `dbvault health` evaluates the latest validated completed manifest matching the
 single configured engine/database. Explicit `health.max_backup_age` controls
@@ -75,7 +75,7 @@ stale and absent backups, invalid sidecars, missing/size-mismatched/corrupt
 artifacts, registry matching, cheap default reads, storage failures/cancellation,
 schedule enabled/disabled state, configuration validation and terminal/JSON modes.
 
-### Verify after backup (`v0.3.1`)
+### Verify after backup (`v0.3.0`)
 
 `protection.verify_after_backup: true` reads the registered stored artifact back
 through the existing streaming SHA-256/size verifier after the immutable manifest
@@ -89,7 +89,7 @@ Unit fixtures cover stored-byte corruption, read failure, evidence-write failure
 cancellation with evidence persistence, bounded streaming, Health/Status and JSON.
 Cloud emulator integration exercises the option through S3, GCS and Azure.
 
-### Safe recovery drill (`v0.3.1`)
+### Safe recovery drill (`v0.3.0`)
 
 The operator-facing `recovery drill` supports SQLite through a new explicitly
 isolated file, using existing verified snapshot/restore machinery and read-only
@@ -107,7 +107,7 @@ exact data comparison and post-restore validation. Native engines fail closed
 until proven target/credential isolation and corresponding actual drills exist;
 previous native restore test-harness evidence does not imply new CLI support.
 
-### Native tool discovery during setup (`v0.3.1`)
+### Native tool discovery during setup (`v0.3.0`)
 
 `dbvault init` now resolves a complete PostgreSQL/MySQL/MongoDB toolchain from
 PATH or bounded known installation directories (including versioned PostgreSQL
