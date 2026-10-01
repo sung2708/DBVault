@@ -13,14 +13,18 @@ import (
 )
 
 type Event struct {
-	Operation    string  `json:"operation"`
-	Status       string  `json:"status"`
-	BackupID     string  `json:"backup_id,omitempty"`
-	DatabaseType string  `json:"database_type"`
-	DatabaseName string  `json:"database_name"`
-	Size         int64   `json:"size,omitempty"`
-	Duration     float64 `json:"duration_seconds,omitempty"`
-	Error        string  `json:"error,omitempty"`
+	Operation                  string  `json:"operation"`
+	Status                     string  `json:"status"`
+	BackupStatus               string  `json:"backup_status,omitempty"`
+	VerificationRequested      bool    `json:"verification_requested,omitempty"`
+	VerificationStatus         string  `json:"verification_status,omitempty"`
+	VerificationEvidenceStatus string  `json:"verification_evidence_status,omitempty"`
+	BackupID                   string  `json:"backup_id,omitempty"`
+	DatabaseType               string  `json:"database_type"`
+	DatabaseName               string  `json:"database_name"`
+	Size                       int64   `json:"size,omitempty"`
+	Duration                   float64 `json:"duration_seconds,omitempty"`
+	Error                      string  `json:"error,omitempty"`
 }
 type Notifier interface {
 	Send(context.Context, Event) error

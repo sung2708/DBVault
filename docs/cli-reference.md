@@ -20,6 +20,9 @@ storage read access. It performs no database writes or cloud object writes/delet
 Slack delivery is never tested. Warnings do not fail readiness, but failed required
 checks return exit code 1. Use `--json` for the structured report.
 `dbvault init` creates configuration with optional interactive setup or flags.
+It discovers supported native database tools in `PATH` and known installation
+locations, then saves validated executable paths. Use `--native-tool-dir DIR`
+to select a complete tool installation explicitly.
 `dbvault update check` checks official release metadata and prints safe update
 instructions; it never downloads or installs a binary.
 `dbvault verify --target KEY` hashes stored bytes and checks metadata size/hash.
@@ -50,13 +53,199 @@ All commands inherit the following root flags:
 - `0`: Operation completed successfully.
 - `1`: General error (e.g., configuration parsing error, invalid flags).
 - `2`: Network or database connection failure.
-- `3`: Native tool dependency missing from PATH.
+- `3`: Native tool dependency missing from configured paths, PATH or known locations.
 - `4`: Checksum integrity verification failed.
 - `5`: Execution canceled (SIGINT / SIGTERM / Timeout).
 
 ---
 
+## `dbvault status`
+
+```text
+dbvault status [--timeout 30s] [--state .dbvault-schedules.json]
+dbvault status --output json
+dbvault status --no-color
+```
+
+Status aggregates the configured database's latest health evaluation, up to five
+validated recent manifests, exact-backup recovery evidence, storage type and
+saved schedule definitions. It does not connect to the database, hash archive
+bytes, restore data or run a drill. The general protection policy currently
+reports `not_configured`; `health.max_backup_age` remains the freshness policy.
+The independent `verify_after_backup` field reports the configured read-back
+setting and does not imply that a broad protection policy was evaluated.
+Integrity uses the latest matching immutable verification record, or `unknown`
+when none exists; health also detects immediate missing/size-mismatched bytes.
+Recovery and checksum integrity remain distinct facts.
+
+The state file is advisory: a saved cron definition does not prove a running
+scheduler process. An unreadable scheduler state only affects that subsection;
+the rest of status still renders. Unreadable configuration remains fatal. JSON is
+one structured result on stdout. `--quiet`, `--no-color`, `NO_COLOR` and redirected
+output follow the global conventions above. Exit code follows operational read
+errors; status evidence such as stale/no backup is reported in the result.
+
+## `dbvault health`
+
+```text
+dbvault health [--verify] [--timeout 30s] [--state .dbvault-schedules.json]
+dbvault health --output json
+dbvault health --no-color
+dbvault health --quiet
+```
+
+Health evaluates the single database in the selected config, matching manifest
+engine and exact database name. It uses the existing validated completed sidecars,
+selecting the newest `created_at` (ties use backup name ascending). Age is measured
+from dump/snapshot start in UTC, so a long-running backup does not hide old data.
+Future creation/completion timestamps produce unknown rather than negative ages.
+There is no separate registry or multi-profile configuration.
+
+Set `health.max_backup_age: 12h` in YAML. There is no default freshness limit and
+cron cadence is not treated as an SLA. Exactly max age is fresh; strictly older
+is stale. Retention does not define freshness.
+
+Age is refreshed after metadata/active-verification I/O, so a backup crossing its
+freshness limit during a long verification does not retain a healthy start-time status.
+
+| Status | Evidence |
+|---|---|
+| `healthy` | Fresh completed backup, valid metadata, artifact exists and latest exact-backup stored-artifact verification evidence passed |
+| `warning` | Fresh backup with unknown verification history, or fresh verified backup with all matching saved schedules disabled |
+| `critical` | No registered matching backup, latest artifact missing, size mismatch, failed stored-artifact verification, failed active verification, or stale backup |
+| `unknown` | Missing freshness policy, future timestamps, or insufficient evidence because a check failed |
+
+Missing/broken artifacts take precedence over absent freshness policy. Unregistered
+orphan archives (including missing sidecars) never count as successful backups.
+An invalid/unreadable sidecar anywhere in the configured namespace prevents a
+reliable latest selection and fails the check; health does not silently skip it
+or fall back to an older artifact. Sidecars from other databases are validated
+but only exact matching engine/database manifests are candidates.
+
+Default checks list the configured provider namespace, read bounded sidecars,
+check only the selected artifact's existence and compare listed size if available.
+The current provider API returns the full namespace listing, so large registries
+still incur listing/sidecar reads; configure a dedicated cloud prefix to bound it.
+Archive contents are never downloaded by default. Local provider initialization
+follows normal storage conventions and creates a missing output directory.
+No database connection, native tools, password resolution, restore or Slack send
+is involved. Cloud read credentials are still required.
+
+`--verify` reuses `verify` and streams only the candidate's full stored bytes;
+this can cost substantial time/bandwidth. Increase the positive `--timeout` for
+large archives. Standalone `verify`, `health --verify`, and configured
+post-backup verification append small immutable records associated with the
+exact backup ID/name/SHA-256/engine/database. JSON `integrity` is `unknown`,
+`verified` (latest matching record passed), or `failed` (latest matching record
+failed). A restore's mandatory pre-write checksum check is not recorded as a
+standalone verification event.
+`restore_test` is `unknown` unless validated separate recovery evidence matches
+the exact selected backup ID/name/SHA-256/engine/source. It then reports the latest
+drill's `passed`, `failed` or `cancelled` result with timestamp and record key.
+Unreadable/invalid/future history produces unknown evidence with a note; no
+positive result is inferred. Health reads these small records, never hashes the
+archive to display history. History is advisory and does not change freshness or
+current checksum status. **Healthy backup does not mean a recovery drill
+has passed.** Checksum integrity is not evidence of successful recovery.
+
+`--state` reads existing schedule definitions, matching the selected config's
+absolute path. Matching IDs, cron expressions and enabled state are advisory.
+No matching definition is not evidence that external scheduling is absent.
+Saved enabled schedules do not prove the foreground daemon is running; missed
+runs are not replayed. Health does not calculate next-run time or infer cadence.
+
+Exit 0 means healthy. Completed warning/critical/unknown checks return 1 and
+already include their reason in stdout, without a duplicate stderr diagnostic.
+Configuration/storage check failures use existing error handling (normally 1);
+invalid/unreadable manifests and active verification failures preserve the existing
+integrity exit code 4; cancellation/deadline returns 5. JSON results are one pure
+stdout object (`status`, `databases`); operational errors additionally use JSON
+stderr diagnostics. Missing evidence fields are omitted instead of fabricated:
+timestamps/age, policy/stale flag, artifact existence and backup identity/size.
+Quiet retains result data/errors and suppresses decoration/hints, consistent
+with the other commands. Non-TTY, `--no-color` and `NO_COLOR` suppress ANSI output.
+
+## `dbvault recovery drill`
+
+```text
+dbvault recovery --help
+dbvault recovery drill --target BACKUP-NAME --recovery-database NEW-SQLITE-PATH --dry-run
+dbvault recovery drill --target BACKUP-NAME --recovery-database NEW-SQLITE-PATH --confirm [--cleanup] [--timeout 2h] [--output json]
+```
+
+V1 supports **SQLite only**. PostgreSQL/MySQL/MongoDB return an unsupported error
+before contacting the database or creating a recovery target. No aliases, force
+bypass, Docker dependency or arbitrary validation hook are provided.
+
+`--target` follows existing restore resolution: backup name from `list`, not its
+manifest ID; local paths must resolve inside storage. `--recovery-database` is a
+new SQLite file in an already existing operator-controlled private directory.
+Both flags are required. Configured production and manifest source paths are
+normalized (including parent links, Windows case and existing file aliases).
+Ambiguous paths, the same destination, any existing target or `-wal`/`-shm`/
+`-journal` sidecar fail closed. Even an empty pre-existing recovery file is refused.
+No production safety guard can be bypassed with confirmation.
+
+`--confirm` authorizes target creation and restore for non-dry runs. The target
+is created with exclusive no-overwrite semantics **after** metadata, stored
+SHA-256/size, engine/format and embedded-engine compatibility checks. Existing
+restore then preflights the new target and uses the same private verified snapshot
+for its normal decompression/online SQLite restore. Target identity is checked
+before writes and before validation/cleanup. The configured production file need
+not exist; embedded version preflight uses an in-memory database. Its parent must
+still resolve unambiguously. All inputs/archives remain operator-trusted under
+the existing threat model; directories must not have untrusted concurrent writers.
+
+Post-restore validation opens the target read-only, requires exactly one `ok`
+from `PRAGMA integrity_check`, and queries `sqlite_schema` object count. This
+proves structural consistency/catalog readability after an actual restore. It
+does not establish application business invariants, row completeness, production
+capacity or an RTO. The result keeps metadata/integrity/compatibility/restore/
+validation/cleanup/record stages separate.
+
+`--dry-run` creates no target or recovery record and never restores. It verifies
+the artifact, checks isolation and embedded-engine compatibility, and reports
+`preflight_passed`, with restore/validation skipped. It needs no `--confirm` and
+cannot be combined with `--cleanup`. Temporary verified snapshots are still used
+and removed, consistent with normal restore dry-run.
+
+By default, recovery files are **preserved**. `--cleanup` removes only the exact
+regular file created by the current invocation after successful validation, if
+its filesystem identity/path still match and no SQLite sidecars remain. Failure
+or cancellation preserves it (possibly partially restored) for inspection.
+Pre-existing/replaced files and unexpected sidecars are never removed.
+An identity/path change reports `ownership_changed` rather than claiming the
+original target was preserved at the supplied path.
+Ordinary `restore --confirm` still follows its existing destructive behavior.
+
+`--timeout` defaults to 2h and must be positive. Native cancellation behavior
+and temporary-snapshot cleanup are reused. Where OS free-space reporting works,
+the CLI checks space after compressed verification and before target creation:
+two raw-image sizes on temporary disk (conservatively budgeting a shared target
+volume), plus one raw-image size on the target volume. These estimates cannot
+reserve disk space; earlier snapshot writes and concurrent usage can still fail.
+
+Real runs with known backup identity attempt to publish a separate random
+`recovery_*.recovery.json` object into the configured backup namespace. Records
+contain ID/name/SHA-256 association, engine/source, times/duration, target state,
+stages and built-in validation evidence, with no credentials or raw errors.
+Configured secrets are redacted in record path/name fields. Successful manifests
+are immutable and never rewritten. Recording failures make the command fail;
+restore/validation stages still report what actually happened. Existing records
+are not overwritten or automatically pruned; deleting a backup does not delete
+its drill history. Storage read **and write** permissions are needed for evidence.
+
+JSON is a single stdout result with `status` (`passed`, `failed`, `cancelled` or
+dry-run `preflight_passed`), stage states, times, target state, validation and
+record key when publication succeeded. Errors use normal redacted stderr records.
+Exit 0 means passed (or successful preflight when explicitly dry-run); other
+results are nonzero using existing categories: normally 1, connection 2, dependency
+3, integrity 4, cancellation/deadline 5. Non-TTY/quiet/JSON never prompt. Output
+flags follow current terminal policies; there are no fabricated progress counts.
+Drills do not send ordinary restore Slack notifications.
+
 ## `dbvault doctor`
+
 
 Run readiness checks before the first backup. Doctor validates configuration,
 checks authenticated database connectivity and required native-tool compatibility,
@@ -111,6 +300,7 @@ dbvault init --non-interactive --database postgres --database-name production --
 | `--non-interactive` | Never prompt; fail on missing required flags |
 | `--force` | Authorize replacing an existing regular configuration file |
 | `--test`, `--timeout` | Optional database/native-tool test before writing; timeout defaults to 30s and must be positive |
+| `--native-tool-dir` | Explicit directory with a complete native toolset for PostgreSQL, MySQL or MongoDB |
 
 An explicit flag skips its question. When any required field is missing and both
 stdin and stderr are terminals, setup asks for missing values and optional settings.
@@ -128,6 +318,12 @@ not contact storage. Non-interactive tests require the referenced password varia
 Interactive tests may request a masked temporary password without saving it.
 Failed tests require interactive approval to save anyway; automation fails without
 writing. Native PostgreSQL/MySQL/MongoDB tools are separate prerequisites.
+
+Interactive setup shows a platform-specific command for setting the configured
+`password_env` variable in the current terminal: a masked PowerShell prompt on
+Windows, or a hidden `read -s` prompt on macOS/Linux. Run later DBVault commands
+from that same terminal. A password entered only for init's optional test is
+temporary; set the environment variable again before backup/restore.
 
 Cloud credentials use the AWS default chain, Google ADC or Azure default identity.
 Setup does not ask for cloud secrets, create buckets or check their permissions.
@@ -158,6 +354,16 @@ Set `--timeout 0` to disable the operation deadline. An omitted `--compression`
 uses configuration; help does not advertise a fixed CLI default. Backup dry-run
 checks tools and authentication but does not initialize or probe write access to
 storage. It creates no dump or artifact.
+
+Set `protection.verify_after_backup: true` to read the published artifact back
+from storage and use the same streaming size/SHA-256 verifier as `dbvault verify`.
+This adds a full object read (including cloud read/API and possible egress cost).
+The immutable manifest is not changed; a separate verification record is written.
+If verification fails or is cancelled, the command exits nonzero and reports
+`backup_status: success` with a failed/cancelled verification state because the
+artifact and manifest were already created. DBVault preserves them for inspection.
+When the option is omitted/false, no post-backup read is performed and JSON says
+`verification.status: not_requested`.
 
 ### Examples
 ```bash
@@ -213,7 +419,7 @@ dbvault restore --config example.yaml --target ./backups/demo_db_20261001_020000
 
 ## 3. `dbvault test`
 
-Runs pre-flight connectivity checks against the database and ensures all required native client utilities exist on `PATH`.
+Runs pre-flight connectivity checks against the database and ensures all required native client utilities resolve from configured paths, `PATH` or supported installation locations.
 
 ### Synopsis
 ```bash

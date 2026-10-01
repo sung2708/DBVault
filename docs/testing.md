@@ -4,6 +4,35 @@ This document details the testing architecture, validation commands, integration
 
 ## Implemented test harness
 
+Recovery drill tests use real embedded SQLite databases with none/gzip/zstd,
+compare restored fixture values, assert production data and immutable manifests
+stay unchanged, and exercise new-file isolation, hardlinks/symlinks (host privilege
+permitting), Windows path normalization, dry-run, owned cleanup and exact-backup
+health association. Failure injection covers corrupted/missing archives, restore
+and validation failure, cancellation, unavailable temporary space, record-write
+failure and replacement-file cleanup refusal. Native engines must fail closed.
+CLI coverage includes JSON purity, non-TTY, quiet/no-color, source-file loss and
+required confirmation/input guards.
+
+The real SQLite integration drill requires no Docker and can run independently:
+
+```bash
+go test -v -tags=integration ./test/integration -run TestSQLiteRecoveryDrill
+```
+
+It restores fixtures to an isolated target and checks exact values for all three
+codecs, verifies production is untouched, rejects the production target and checks
+owned cleanup. Native database/cloud integration tests remain separate and require
+Docker; they are not evidence that the new native recovery-drill CLI is supported.
+
+The Docker suite also checks health against real registered PostgreSQL/MySQL/
+MongoDB backups and SQLite backups on local/S3/GCS/Azure storage for all codecs.
+Injected clocks cover fresh default/active verification, exact age limit, stale,
+missing policy and no matching backup. Cloud fixtures perform new SQLite recovery
+drills and check saved exact-backup health evidence; native fixtures assert that
+the new drill fails closed before mutation, alongside existing full/selected
+restore dataset checks.
+
 Setup tests inject a fake Prompter for all database/storage combinations, partial
 flags, existing-file approval/cancel, transient password redaction and failed tests.
 Config writer tests cover concurrent no-overwrite publication, private permissions,
@@ -48,7 +77,8 @@ drops the table, restores, and compares the complete dataset hash for none/gzip/
 zstd. It also mutates data and tests selected-table clean restore. Readiness
 uses deadline-bound polling; missing Docker infrastructure causes explicit
 failure rather than a silent skip. Host pg_dump installation is unnecessary
-for this test; production CLI still requires native tools in PATH.
+for this test; production CLI resolves native tools through configured paths,
+PATH and supported platform locations.
 
 The older manual container procedure below is optional; the automated drill
 does not need that container. CI runs the drill on Linux. A Windows symlink test

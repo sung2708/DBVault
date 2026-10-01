@@ -97,6 +97,8 @@ func (r *Renderer) status(kind, s string, stderr bool) string {
 		return st.failure.Render(text)
 	case "warning":
 		return st.warning.Render(text)
+	case "unknown":
+		return st.muted.Render(text)
 	default:
 		return st.accent.Render(text)
 	}

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/database"
 	"github.com/sung2708/DBVault/internal/notify"
 	"testing"
@@ -16,6 +17,7 @@ func (n *recordedNotifier) Send(ctx context.Context, e notify.Event) error {
 }
 func TestNotificationOutageDoesNotAlterBackupRestore(t *testing.T) {
 	svc, db, _ := setup(t, "gzip")
+	svc.Config.Protection = &config.Protection{VerifyAfterBackup: true}
 	n := &recordedNotifier{}
 	svc.Notifier = n
 	m, e := svc.Backup(context.Background(), "full", false)
@@ -29,7 +31,7 @@ func TestNotificationOutageDoesNotAlterBackupRestore(t *testing.T) {
 	if _, e = svc.Backup(context.Background(), "full", false); e == nil {
 		t.Fatal("dump failure lost")
 	}
-	if len(n.events) != 3 || n.events[0].Status != "completed" || n.events[1].Operation != "restore" || n.events[2].Status != "failed" {
+	if len(n.events) != 3 || n.events[0].Status != "completed" || n.events[0].BackupStatus != "success" || !n.events[0].VerificationRequested || n.events[0].VerificationStatus != "verified" || n.events[0].VerificationEvidenceStatus != "recorded" || n.events[1].Operation != "restore" || n.events[2].Status != "failed" || n.events[2].BackupStatus != "failed" {
 		t.Fatal(n.events)
 	}
 	svc.Backup(context.Background(), "full", true)

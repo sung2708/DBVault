@@ -10,20 +10,22 @@ import (
 )
 
 var stages = map[string][2]string{
-	"configuration":   {"Loading configuration", "Configuration loaded"},
-	"preflight":       {"Checking database connectivity and tools", "Database connection and tools verified"},
-	"backup.stream":   {"Creating, compressing and storing backup", "Backup stream stored"},
-	"backup.register": {"Registering completed backup", "Backup metadata registered"},
-	"manifest":        {"Reading backup metadata", "Backup metadata valid"},
-	"verify":          {"Verifying stored size and SHA-256", "Stored size and SHA-256 verified"},
-	"restore.verify":  {"Reading and verifying a private restore snapshot", "Restore snapshot verified"},
-	"restore.write":   {"Decompressing and restoring database", "Database restore completed"},
-	"delete":          {"Deleting archive and metadata", "Archive and metadata deleted"},
-	"delete.preview":  {"Checking deletion selection", "Deletion preview ready"},
-	"list":            {"Reading registered backups", "Backup listing loaded"},
-	"cleanup.select":  {"Selecting retention candidates", "Retention selection ready"},
-	"cleanup.verify":  {"Verifying registered backups before deletion", "Registered backups verified"},
-	"cleanup.delete":  {"Deleting retention candidates", "Retention cleanup completed"},
+	"configuration":         {"Loading configuration", "Configuration loaded"},
+	"preflight":             {"Checking database connectivity and tools", "Database connection and tools verified"},
+	"backup.stream":         {"Creating, compressing and storing backup", "Backup stream stored"},
+	"backup.register":       {"Registering completed backup", "Backup metadata registered"},
+	"manifest":              {"Reading backup metadata", "Backup metadata valid"},
+	"verify":                {"Verifying stored size and SHA-256", "Stored size and SHA-256 verified"},
+	"restore.verify":        {"Reading and verifying a private restore snapshot", "Restore snapshot verified"},
+	"restore.write":         {"Decompressing and restoring database", "Database restore completed"},
+	"restore.compatibility": {"Checking restore compatibility", "Restore compatibility verified"},
+	"recovery.validation":   {"Validating restored SQLite structure", "Post-restore validation passed"},
+	"delete":                {"Deleting archive and metadata", "Archive and metadata deleted"},
+	"delete.preview":        {"Checking deletion selection", "Deletion preview ready"},
+	"list":                  {"Reading registered backups", "Backup listing loaded"},
+	"cleanup.select":        {"Selecting retention candidates", "Retention selection ready"},
+	"cleanup.verify":        {"Verifying registered backups before deletion", "Registered backups verified"},
+	"cleanup.delete":        {"Deleting retention candidates", "Retention cleanup completed"},
 }
 
 func stageLabel(stage string, complete bool) string {

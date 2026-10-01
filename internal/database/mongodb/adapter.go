@@ -16,6 +16,7 @@ import (
 	"github.com/sung2708/DBVault/internal/database"
 	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/fault"
+	"github.com/sung2708/DBVault/internal/toolresolve"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -77,16 +78,31 @@ func (b *bounded) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-var toolVersion = regexp.MustCompile(`(?:version:|version)\s*(100\.\d+\.\d+)`)
+var toolVersion = regexp.MustCompile(`(?:(?:version:|version)\s*)?(100\.\d+\.\d+)`)
+
+func ValidateToolVersions(dump, restore string) error {
+	d := toolVersion.FindStringSubmatch(dump)
+	r := toolVersion.FindStringSubmatch(restore)
+	if len(d) != 2 || len(r) != 2 {
+		return fmt.Errorf("requires valid MongoDB Database Tools version 100.x")
+	}
+	if d[1] != r[1] {
+		return fmt.Errorf("mongodump and mongorestore must use the same Database Tools version")
+	}
+	return nil
+}
 
 func (a *Adapter) Preflight(ctx context.Context) (database.Info, error) {
 	info := database.Info{}
+	paths := make([]string, 0, 2)
 	for _, tool := range []string{"mongodump", "mongorestore"} {
-		if _, err := a.Runner.LookPath(tool); err != nil {
+		path, err := toolresolve.Resolve(tool, a.Config.Tools[tool], a.Runner)
+		if err != nil {
 			return info, err
 		}
+		paths = append(paths, path)
 		b := &bounded{}
-		if err := a.Runner.Run(ctx, runner.Spec{Executable: tool, Args: []string{"--version"}, Stdout: b}); err != nil {
+		if err := a.Runner.Run(ctx, runner.Spec{Executable: path, Args: []string{"--version"}, Stdout: b}); err != nil {
 			return info, fault.Wrap(fault.Dependency, "discover "+tool, err)
 		}
 		v := toolVersion.FindStringSubmatch(string(b.data))
@@ -98,6 +114,12 @@ func (a *Adapter) Preflight(ctx context.Context) (database.Info, error) {
 		} else {
 			info.RestoreToolVersion = v[1]
 		}
+	}
+	if err := toolresolve.SameToolchain(paths); err != nil {
+		return info, fault.Wrap(fault.Dependency, "MongoDB toolchain", err)
+	}
+	if err := ValidateToolVersions(info.ToolVersion, info.RestoreToolVersion); err != nil {
+		return info, fault.Wrap(fault.Unsupported, "MongoDB tool compatibility", err)
 	}
 	v, err := a.probe(ctx)
 	info.ServerVersion = v
@@ -130,7 +152,11 @@ func (a *Adapter) run(ctx context.Context, tool string, args []string, r io.Read
 		base = append(base, "--ssl")
 	}
 	base = append(base, args...)
-	return a.Runner.Run(ctx, runner.Spec{Executable: tool, Args: base, Stdin: r, Stdout: w})
+	path, err := toolresolve.Resolve(tool, a.Config.Tools[tool], a.Runner)
+	if err != nil {
+		return err
+	}
+	return a.Runner.Run(ctx, runner.Spec{Executable: path, Args: base, Stdin: r, Stdout: w})
 }
 func (a *Adapter) Dump(ctx context.Context, w io.Writer) error {
 	if !a.Config.Options.Quiesced {

@@ -12,6 +12,13 @@ Slack, retention and persistent cron schedules. See
 Incremental/differential recovery chains, client-side encryption and live-cloud
 validation remain separate future milestones.
 
+### Recovery operations (Unreleased)
+
+- [x] Safe SQLite recovery-drill CLI with isolated restore, structural validation,
+  owned cleanup and immutable exact-backup health evidence.
+- [ ] Safe native PostgreSQL/MySQL/MongoDB recovery drills with proven server/
+  credential isolation and corresponding real integration evidence.
+
 ### Available in Phase 0:
 - [x] Comprehensive architectural blueprint and pipeline design.
 - [x] Standardized configuration schema specification (`dbvault.yaml`).

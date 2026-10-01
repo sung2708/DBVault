@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/sung2708/DBVault/internal/app"
 	"github.com/sung2708/DBVault/internal/database"
 	"github.com/sung2708/DBVault/internal/doctor"
 	"github.com/sung2708/DBVault/internal/metadata"
@@ -23,6 +24,255 @@ func (r *Renderer) Result(operation string, value any) error {
 	}
 	var b strings.Builder
 	switch v := value.(type) {
+	case app.BackupResult:
+		if r.options.Quiet && v.Manifest.Name != "" {
+			if v.Verification.Requested {
+				fmt.Fprintf(&b, "%s\t%s\t%s\n", r.safe(v.Manifest.Name), r.safe(v.Verification.Status), r.safe(v.Verification.EvidenceStatus))
+			} else {
+				fmt.Fprintln(&b, r.safe(v.Manifest.Name))
+			}
+			_, err := fmt.Fprint(r.out, b.String())
+			return err
+		}
+		verified := v.Verification.Status == "verified"
+		attention := v.Verification.Requested && (!verified || v.Verification.EvidenceStatus != "recorded")
+		title, kind := "Backup completed", "success"
+		if v.Manifest.Name == "" {
+			title, kind = "Backup failed", "error"
+		}
+		if v.Verification.Requested && v.Verification.EvidenceStatus == "failed" {
+			title, kind = "Backup artifact created; verification evidence failed", "error"
+		} else if v.Verification.Requested && !verified {
+			title, kind = "Backup artifact created; verification "+v.Verification.Status, "error"
+		}
+		r.title(&b, kind, title)
+		{
+			r.field(&b, "Database", v.Manifest.Database.Name)
+			r.field(&b, "Backup ID", v.BackupID)
+			r.field(&b, "Backup", v.Manifest.Name)
+			r.field(&b, "Type", Engine(v.Manifest.Database.Engine))
+			r.field(&b, "Compression", v.Manifest.Pipeline.Compression)
+			r.field(&b, "Stored size", FormatBytes(v.Manifest.Pipeline.Stored))
+			r.field(&b, "Storage", v.Manifest.Storage)
+			if v.Verification.Requested {
+				style := "warning"
+				if verified {
+					style = "success"
+				} else if v.Verification.Status == "failed" || v.Verification.Status == "evidence_failed" {
+					style = "error"
+				}
+				fmt.Fprintln(&b, r.outStyle.muted.Render(fmt.Sprintf("  %-13s ", "Integrity"))+r.status(style, v.Verification.Status, false))
+				r.field(&b, "Evidence", v.Verification.EvidenceStatus)
+				r.field(&b, "Verified bytes", FormatBytes(v.Verification.Bytes))
+			}
+			r.field(&b, "Duration", FormatDuration(time.Duration(v.Manifest.Duration*float64(time.Second))))
+		}
+		if attention && v.Verification.EvidenceStatus == "failed" {
+			r.hint(&b, "The backup and its verified bytes remain stored; evidence could not be recorded. The health report will treat integrity as unknown.")
+		} else if v.Verification.Requested && !verified {
+			r.hint(&b, "The backup artifact remains stored for investigation; see the verification record and run dbvault verify --target "+r.safe(v.Manifest.Name)+".")
+		} else if verified {
+			r.hint(&b, "Stored artifact bytes were read and matched the manifest SHA-256. This is not a recovery drill.")
+		}
+	case app.StatusResult:
+		r.title(&b, "header", "DBVault Status")
+		r.field(&b, "Database", Engine(v.Database.Engine)+" / "+v.Database.Name)
+		r.field(&b, "Protection", "Not configured")
+		verifyPolicy := "Disabled"
+		if v.VerifyAfterBackup {
+			verifyPolicy = "Enabled"
+		}
+		r.field(&b, "Verify after backup", verifyPolicy)
+		r.field(&b, "Backup health", string(v.BackupHealth))
+		if v.BackupReason != "" {
+			r.field(&b, "Health detail", v.BackupReason)
+		}
+		if v.LastBackup == nil {
+			r.field(&b, "Last backup", "No successful backup found")
+			r.hint(&b, "Run dbvault backup to create the first backup.")
+		} else {
+			lastAge := "future timestamp"
+			if v.LastBackup.AgeSeconds >= 0 {
+				lastAge = FormatDuration(time.Duration(v.LastBackup.AgeSeconds*float64(time.Second))) + " ago"
+			}
+			r.field(&b, "Last backup", lastAge)
+			r.field(&b, "Backup name", v.LastBackup.Name)
+		}
+		integrityKind := "unknown"
+		if v.Integrity == "verified" {
+			integrityKind = "success"
+		} else if v.Integrity == "failed" {
+			integrityKind = "error"
+		}
+		fmt.Fprintln(&b, r.outStyle.muted.Render(fmt.Sprintf("  %-13s ", "Integrity"))+r.status(integrityKind, v.Integrity, false))
+		if v.LastVerifiedAt != nil {
+			r.field(&b, "Last verified", FormatTime(*v.LastVerifiedAt))
+		}
+		recoveryKind := "unknown"
+		recoveryText := v.RecoveryDrill.Status
+		if recoveryText == "passed" {
+			recoveryKind = "success"
+		} else if recoveryText == "failed" || recoveryText == "cancelled" {
+			recoveryKind = "error"
+		}
+		if recoveryText == "never_tested" {
+			recoveryText = "Never tested"
+		}
+		if v.RecoveryDrill.CompletedAt != nil {
+			recoveryText += " (" + FormatDuration(v.GeneratedAt.Sub(*v.RecoveryDrill.CompletedAt)) + " ago)"
+		}
+		fmt.Fprintln(&b, r.outStyle.muted.Render(fmt.Sprintf("  %-13s ", "Recovery drill"))+r.status(recoveryKind, recoveryText, false))
+		if v.RecoveryDrill.Note != "" {
+			r.field(&b, "Recovery note", v.RecoveryDrill.Note)
+		}
+		storageName := v.Storage.Type
+		switch storageName {
+		case "local":
+			storageName = "Local"
+		case "s3":
+			storageName = "S3"
+		case "gcs":
+			storageName = "GCS"
+		case "azure":
+			storageName = "Azure"
+		}
+		r.field(&b, "Storage", storageName)
+		if len(v.Schedules) == 0 {
+			if v.ScheduleNote != "" {
+				r.field(&b, "Schedule", "State unavailable")
+			} else {
+				r.field(&b, "Schedule", "None configured")
+			}
+		} else {
+			for _, job := range v.Schedules {
+				state := "disabled"
+				if job.Enabled {
+					state = "configured (liveness unknown)"
+				}
+				r.field(&b, "Schedule", job.ID+": "+job.Cron+" ("+state+")")
+			}
+		}
+		if v.ScheduleNote != "" {
+			r.hint(&b, v.ScheduleNote)
+		}
+		if len(v.RecentBackups) == 0 {
+			fmt.Fprintln(&b, "\nRecent Backups\n  No backups found.")
+		} else {
+			rows := make([][]string, 0, len(v.RecentBackups))
+			for _, item := range v.RecentBackups {
+				age := "future"
+				if item.AgeSeconds >= 0 {
+					age = FormatDuration(time.Duration(item.AgeSeconds * float64(time.Second)))
+				}
+				rows = append(rows, []string{age, item.Type, FormatBytes(item.StoredBytes), item.Status})
+			}
+			fmt.Fprintln(&b, "\nRecent Backups")
+			r.table(&b, []string{"AGE", "TYPE", "SIZE", "STATUS"}, rows)
+		}
+		r.hint(&b, "Status uses existing evidence; it does not perform full verification or a recovery drill.")
+	case app.DrillResult:
+		r.title(&b, "header", "DBVault Recovery Drill")
+		kind := "error"
+		if v.Status == "passed" {
+			kind = "success"
+		} else if v.Status == "preflight_passed" {
+			kind = "warning"
+		}
+		fmt.Fprintln(&b, r.status(kind, v.Status, false))
+		r.field(&b, "Backup", v.BackupName)
+		r.field(&b, "Engine", Engine(v.Engine))
+		r.field(&b, "Recovery file", v.RecoveryTarget)
+		r.field(&b, "Target state", v.TargetState)
+		r.field(&b, "Duration", FormatDuration(time.Duration(v.DurationSeconds*float64(time.Second))))
+		for _, stage := range v.Stages {
+			style := "unknown"
+			if stage.Status == "passed" {
+				style = "success"
+			} else if stage.Status == "failed" {
+				style = "error"
+			}
+			fmt.Fprintf(&b, "  %s %s\n", r.status(style, stage.Status, false), r.safe(stage.Name))
+		}
+		if v.Validation != nil {
+			r.field(&b, "Validation", v.Validation.Method)
+			r.field(&b, "Objects", fmt.Sprint(v.Validation.Objects))
+		}
+		if v.RecordKey != "" {
+			r.field(&b, "Drill record", v.RecordKey)
+		}
+		if v.DryRun {
+			r.hint(&b, "No restore was performed; preflight is not evidence of successful recovery.")
+		} else {
+			r.hint(&b, "Validation checks SQLite structure and catalog readability, not application business invariants.")
+			if v.TargetState == "preserved" {
+				r.hint(&b, "Recovery target was preserved for inspection: "+r.safe(v.RecoveryTarget))
+			}
+		}
+	case app.HealthReport:
+		r.title(&b, "header", "Backup Health")
+		for _, h := range v.Databases {
+			r.field(&b, "Database", h.Name)
+			kind := "unknown"
+			switch h.Status {
+			case app.Healthy:
+				kind = "success"
+			case app.Warning:
+				kind = "warning"
+			case app.Critical:
+				kind = "error"
+			}
+			fmt.Fprintln(&b, r.outStyle.muted.Render(fmt.Sprintf("  %-13s ", "Status"))+r.status(kind, string(h.Status), false))
+			last := "Unknown"
+			if h.Status == app.Critical && h.BackupName == "" {
+				last = "Never"
+			}
+			if h.LastBackupAt != nil {
+				last = FormatTime(*h.LastBackupAt)
+			}
+			r.field(&b, "Last backup", last)
+			if h.AgeSeconds != nil {
+				r.field(&b, "Backup age", FormatDuration(time.Duration(*h.AgeSeconds*float64(time.Second))))
+			}
+			if h.BackupName != "" {
+				r.field(&b, "Backup", h.BackupName)
+				r.field(&b, "Stored size", FormatBytes(h.StoredBytes))
+			}
+			if h.ArtifactExists != nil {
+				r.field(&b, "Artifact exists", fmt.Sprint(*h.ArtifactExists))
+			}
+			integrityKind := "unknown"
+			if h.Integrity == "verified" {
+				integrityKind = "success"
+			} else if h.Integrity == "failed" {
+				integrityKind = "error"
+			}
+			fmt.Fprintln(&b, r.outStyle.muted.Render(fmt.Sprintf("  %-13s ", "Integrity"))+r.status(integrityKind, h.Integrity, false))
+			r.field(&b, "Restore test", h.RestoreTest)
+			if h.LastRecoveryDrillAt != nil {
+				r.field(&b, "Last drill", FormatTime(*h.LastRecoveryDrillAt))
+			}
+			if h.RecoveryRecord != "" {
+				r.field(&b, "Drill record", h.RecoveryRecord)
+			}
+			if h.RecoveryNote != "" {
+				r.field(&b, "Recovery note", h.RecoveryNote)
+			}
+			if h.MaxAgeSeconds != nil {
+				r.field(&b, "Max age", time.Duration(*h.MaxAgeSeconds*float64(time.Second)).String())
+			}
+			r.field(&b, "Reason", h.Reason)
+			for _, job := range h.Schedules {
+				state := "disabled"
+				if job.Enabled {
+					state = "enabled"
+				}
+				r.field(&b, "Schedule", job.ID+" ("+state+"): "+job.Cron)
+			}
+			if h.ScheduleNote != "" {
+				r.field(&b, "Schedule note", h.ScheduleNote)
+			}
+			r.hint(&b, "Healthy backup does not mean a recovery drill has passed.")
+		}
 	case doctor.Report:
 		title, state := "System readiness checks", "success"
 		if !v.Ready {
@@ -66,8 +316,11 @@ func (r *Renderer) Result(operation string, value any) error {
 			status = "Database connection and native tools verified"
 		}
 		r.field(&b, "Connection", status)
-		if v.PasswordEnv != "" {
+		if v.PasswordEnv != "" && v.PasswordInstructions == "" {
 			r.hint(&b, "Before database operations, set environment variable: "+r.safe(v.PasswordEnv))
+		}
+		if v.PasswordInstructions != "" {
+			r.hint(&b, r.safe(v.PasswordInstructions))
 		}
 		path := quoteSetupPath(r.safe(v.Path))
 		r.hint(&b, fmt.Sprintf("Next:\n  dbvault config --config %s\n  dbvault test --config %s\n  dbvault doctor --config %s\n  dbvault backup --config %s --dry-run\n  dbvault backup --config %s", path, path, path, path, path))

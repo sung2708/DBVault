@@ -34,6 +34,8 @@ func symbol(kind string, unicode bool) string {
 			return "✗"
 		case "warning":
 			return "!"
+		case "unknown":
+			return "?"
 		default:
 			return "→"
 		}
@@ -47,6 +49,8 @@ func symbol(kind string, unicode bool) string {
 		return "[ERROR]"
 	case "warning":
 		return "[WARN]"
+	case "unknown":
+		return "?"
 	default:
 		return ">"
 	}

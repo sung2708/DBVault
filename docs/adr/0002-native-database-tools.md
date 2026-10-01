@@ -16,7 +16,7 @@ Re-implementing logical database dumping from scratch is fraught with edge cases
 
 We propose delegating physical and logical database dumping and restoration to verified native database client utilities (`pg_dump`, `mysqldump`, `psql`, `mysql`). 
 
-DBVault acts as an orchestrator: validating that required client tools are installed, generating safe structured arguments, managing process lifecycles via `os/exec.CommandContext`, and intercepting stdout/stdin streams.
+DBVault acts as an orchestrator: resolving client tools from explicit configuration, `PATH`, and bounded platform installation locations; validating their versions; generating safe structured arguments; managing process lifecycles via `os/exec.CommandContext`; and intercepting stdout/stdin streams. `dbvault init` stores discovered absolute paths so later operations use the same installation.
 
 ## Alternatives Considered
 
@@ -31,5 +31,5 @@ DBVault acts as an orchestrator: validating that required client tools are insta
 - Vendor utilities are heavily tested, optimized, and maintained by upstream database teams.
 
 ### Negative
-- Requires target hosts or container images to have corresponding native client utilities installed in `PATH`.
+- Requires target hosts or container images to have corresponding native client utilities installed. Custom locations can be configured explicitly; DBVault does not modify the host `PATH`.
 - Version divergence between client utilities and database servers must be monitored.

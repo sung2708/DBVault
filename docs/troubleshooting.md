@@ -13,17 +13,15 @@ This guide provides diagnostic procedures and remedies for common operational er
 
 ## 1. Native Tool Dependency Errors
 
-### `pg_dump: command not found` / `pg_dump not found in PATH`
-- **Symptom:** CLI terminates immediately with `[ERROR] failed to locate native tool 'pg_dump' in PATH`.
-- **Likely Cause:** PostgreSQL client tools are not installed or their installation path is not in the system `PATH`.
-- **How to Diagnose:** Run `which pg_dump` (Linux/macOS) or `Get-Command pg_dump` (PowerShell).
-- **How to Fix:** Install PostgreSQL client package (`postgresql-client` on Debian/Ubuntu, `brew install libpq` on macOS) and update your system `PATH`.
+### Native tools not found or configured tool has moved
+- **Symptom:** DBVault reports that a required native tool is unavailable.
+- **Likely Cause:** The client tools are not installed, the installation is outside supported discovery locations, or a saved executable path no longer exists.
+- **How to Diagnose:** Run `dbvault doctor`; inspect `database.tools` in the selected YAML. `dbvault init` can discover tools again.
+- **How to Fix:** Install the matching client tools and re-run `dbvault init`, or use `--native-tool-dir` with the directory containing the complete engine toolset. Existing configurations without explicit paths continue to use `PATH` and supported known locations.
 
-### `mysqldump: command not found` / `mysqldump not found in PATH`
-- **Symptom:** CLI terminates with `[ERROR] failed to locate native tool 'mysqldump' in PATH`.
-- **Likely Cause:** MySQL client binaries are missing from the environment.
-- **How to Diagnose:** Run `mysqldump --version`.
-- **How to Fix:** Install MySQL client utilities (`default-mysql-client` on Linux, `brew install mysql-client` on macOS).
+If a tool path was saved and the tool was moved or uninstalled, DBVault reports that
+path and recommends `dbvault doctor` or running `dbvault init` again. DBVault never
+updates the system `PATH` automatically.
 
 ---
 

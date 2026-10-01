@@ -249,6 +249,46 @@ func TestConnectionSuccessAndExistingReview(t *testing.T) {
 	}
 }
 
+func TestDiscoveredToolPathsAreSaved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	bin := filepath.Join(t.TempDir(), "PostgreSQL 18", "bin")
+	want := map[string]string{"pg_dump": filepath.Join(bin, "pg_dump.exe"), "pg_restore": filepath.Join(bin, "pg_restore.exe"), "psql": filepath.Join(bin, "psql.exe")}
+	values := map[string]string{"database": "postgres", "database-name": "prod", "user": "backup", "storage": "local"}
+	called := false
+	_, err := Run(context.Background(), Options{Values: values, Path: path, DiscoverNativeTools: func(_ context.Context, engine, dir string) (map[string]string, error) {
+		called = true
+		if engine != "postgres" || dir != "" {
+			t.Fatal(engine, dir)
+		}
+		return want, nil
+	}})
+	if err != nil || !called {
+		t.Fatal(err, called)
+	}
+	c, err := config.Load(path, config.Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, toolPath := range want {
+		if c.Database.Tools[name] != toolPath {
+			t.Fatalf("%s: %q != %q", name, c.Database.Tools[name], toolPath)
+		}
+	}
+}
+
+func TestPasswordEnvironmentInstructionsByOS(t *testing.T) {
+	windows := PasswordEnvironmentInstructions("DB_PASSWORD", "windows")
+	if !strings.Contains(windows, "$env:DB_PASSWORD") || !strings.Contains(windows, "Read-Host") {
+		t.Fatal(windows)
+	}
+	for _, osName := range []string{"linux", "darwin"} {
+		text := PasswordEnvironmentInstructions("DB_PASSWORD", osName)
+		if !strings.Contains(text, "read -s DB_PASSWORD") || !strings.Contains(text, "export DB_PASSWORD") {
+			t.Fatal(osName, text)
+		}
+	}
+}
+
 type reviewPrompt struct {
 	fakePrompt
 	reviewed bool

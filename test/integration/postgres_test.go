@@ -125,6 +125,7 @@ func TestPostgresBackupDestroyRestore(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			assertBackupHealth(t, ctx, s, m)
 			query("DROP TABLE items")
 			if err = s.Restore(ctx, m.Name, true, false, database.RestoreOptions{}); err != nil {
 				t.Fatal(err)

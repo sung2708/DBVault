@@ -53,7 +53,7 @@ including `-dirty` for modified checkouts. Without a linker build date, Built is
 
 > [!IMPORTANT]
 > **Native Tool Dependency:**
-> Standalone DBVault binaries use native logical dump/restore tools for PostgreSQL, MySQL and MongoDB. Install those clients in `PATH`, or use the matching Docker runtime target. SQLite uses the embedded driver and needs no client executable.
+> Standalone DBVault binaries use native logical dump/restore tools for PostgreSQL, MySQL and MongoDB. `dbvault init` discovers tools in `PATH` and supported installation locations and saves their absolute paths. SQLite uses the embedded driver and needs no client executable.
 
 ---
 

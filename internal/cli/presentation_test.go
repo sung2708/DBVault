@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sung2708/DBVault/internal/app"
 	"github.com/sung2708/DBVault/internal/metadata"
 )
 
@@ -35,6 +36,41 @@ func uiFixture(t *testing.T) (string, string) {
 		t.Fatal(e)
 	}
 	return cfg, source
+}
+
+func TestVerifyAfterBackupMachineResult(t *testing.T) {
+	cfg, _ := uiFixture(t)
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, []byte("protection:\n  verify_after_backup: true\n")...)
+	if err = os.WriteFile(cfg, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, diag, err := uiRun("backup", "--config", cfg, "--output", "json")
+	if err != nil {
+		t.Fatal(err, diag)
+	}
+	var result app.BackupResult
+	if err = json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err, out)
+	}
+	if result.BackupID == "" || result.BackupStatus != "success" || result.Verification.Status != "verified" || result.Verification.EvidenceStatus != "recorded" || result.Verification.Bytes != result.Manifest.Pipeline.Stored || result.Verification.RecordKey == "" {
+		t.Fatal(result)
+	}
+	jsonLines(t, diag)
+	if diag != "" {
+		jsonLines(t, diag)
+	}
+	statusOutput, statusDiag, statusErr := uiRun("status", "--config", cfg, "--output", "json")
+	if statusErr != nil {
+		t.Fatal(statusErr, statusDiag)
+	}
+	var status app.StatusResult
+	if err = json.Unmarshal([]byte(statusOutput), &status); err != nil || status.Integrity != "verified" || status.LastVerifiedAt == nil {
+		t.Fatal(status, err, statusOutput)
+	}
 }
 func uiRun(args ...string) (string, string, error) {
 	var out, errOut bytes.Buffer

@@ -55,37 +55,45 @@ func (s *Service) Test(ctx context.Context) (database.Info, error) {
 	}
 	return info, err
 }
-func (s *Service) Backup(ctx context.Context, kind string, dry bool) (result metadata.Manifest, resultErr error) {
+func (s *Service) Backup(ctx context.Context, kind string, dry bool) (metadata.Manifest, error) {
+	result, err := s.BackupWithResult(ctx, kind, dry)
+	return result.Manifest, err
+}
+
+func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (operation BackupResult, resultErr error) {
+	operation.BackupStatus = "failed"
+	operation.Verification = VerificationResult{Requested: s.Config.Protection != nil && s.Config.Protection.VerifyAfterBackup, Status: "not_requested", EvidenceStatus: "not_requested"}
 	notificationStart := s.now()
 	defer func() {
 		if !dry {
-			eventManifest := result
+			eventManifest := operation.Manifest
 			eventManifest.Duration = s.now().Sub(notificationStart).Seconds()
-			s.notify(ctx, "backup", eventManifest, resultErr)
+			s.notifyBackup(ctx, eventManifest, resultErr, operation.BackupStatus, operation.Verification)
 		}
 	}()
 	var m metadata.Manifest
 	if s.DB == nil {
-		return m, fault.Wrap(fault.Unsupported, "database adapter", fmt.Errorf("not implemented"))
+		return operation, fault.Wrap(fault.Unsupported, "database adapter", fmt.Errorf("not implemented"))
 	}
 	if err := database.RequireBackup(s.DB, kind); err != nil {
-		return m, err
+		return operation, err
 	}
 	info, err := s.Test(ctx)
 	if err != nil {
-		return m, err
+		return operation, err
 	}
 	if dry {
-		return m, nil
+		operation.BackupStatus = "not_created"
+		return operation, nil
 	}
 	c, err := compression.New(s.Config.Compression.Type, s.Config.Compression.Level)
 	if err != nil {
-		return m, err
+		return operation, err
 	}
 	start := s.now()
 	id, key, err := metadata.Identity(s.Config.Database.Database, s.DB.Extension()+c.Extension(), start)
 	if err != nil {
-		return m, err
+		return operation, err
 	}
 	s.log("backup started", "backup_id", id, "operation", "backup", "database_type", s.DB.Name(), "database_name", s.Config.Database.Database, "storage", s.Config.Storage.Type, "compression", s.Config.Compression.Type)
 	s.stage("backup.stream", "start")
@@ -136,7 +144,7 @@ func (s *Service) Backup(ctx context.Context, kind string, dry bool) (result met
 			defer cleanupCancel()
 			err = errors.Join(err, s.Store.Delete(cleanupCtx, key))
 		}
-		return m, fault.Wrap(fault.Backup, "stream dump", err)
+		return operation, fault.Wrap(fault.Backup, "stream dump", err)
 
 	}
 	s.stage("backup.stream", "complete")
@@ -155,11 +163,25 @@ func (s *Service) Backup(ctx context.Context, kind string, dry bool) (result met
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cleanupCancel()
 		cleanupErr := s.Store.Delete(cleanupCtx, key)
-		return metadata.Manifest{}, fault.Wrap(fault.Storage, "register manifest", errors.Join(err, cleanupErr))
+		return operation, fault.Wrap(fault.Storage, "register manifest", errors.Join(err, cleanupErr))
 	}
+	operation.Manifest = m
+	operation.BackupID = m.ID
+	operation.BackupStatus = "success"
 	s.emit(Event{Stage: "backup.register", State: "complete", Manifest: m})
 	s.log("backup completed", "backup_id", id, "status", "completed", "duration", m.Duration, "size", stored)
-	return m, nil
+	if operation.Verification.Requested {
+		verifiedManifest, verification, verifyErr := s.verifyAndRecord(ctx, key, &m)
+		operation.Manifest = verifiedManifest
+		operation.Verification = verification
+		if verifyErr != nil {
+			wrapped := &PostBackupVerificationError{Verification: verification, Err: verifyErr}
+			s.log("backup created but post-backup verification failed", "backup_id", m.ID, "verification_status", verification.Status, "failure_category", verification.FailureCategory)
+			return operation, wrapped
+		}
+		s.log("backup post-verification completed", "backup_id", m.ID, "verification_status", verification.Status, "verified_bytes", verification.Bytes)
+	}
+	return operation, nil
 }
 func (s *Service) ReadManifest(ctx context.Context, key string) (metadata.Manifest, error) {
 	r, err := s.Store.Get(ctx, key+".meta.json")
@@ -211,29 +233,13 @@ func (s *Service) snapshot(ctx context.Context, key string) (metadata.Manifest, 
 	s.stage("restore.verify", "complete")
 	return m, f, nil
 }
-func (s *Service) Verify(ctx context.Context, key string) (metadata.Manifest, error) {
-	s.stage("manifest", "start")
-	m, err := s.ReadManifest(ctx, key)
-	if err != nil {
-		return m, err
-	}
-	s.emit(Event{Stage: "manifest", State: "complete", Manifest: m})
-	r, err := s.Store.Get(ctx, key)
-	if err != nil {
-		return m, fault.Wrap(fault.Integrity, "open artifact", err)
-	}
-	defer r.Close()
-	s.stage("verify", "start")
-	hash, n, err := pipeline.Hash(ctx, s.meter(r, "verify", m.Pipeline.Stored), io.Discard)
-	if err == nil && (hash != m.Checksum.Hash || n != m.Pipeline.Stored) {
-		err = fmt.Errorf("checksum or stored size mismatch")
-	}
-	if err == nil {
-		s.stage("verify", "complete")
-	}
-	return m, fault.Wrap(fault.Integrity, "verify stored artifact", err)
-}
 func (s *Service) Restore(ctx context.Context, key string, confirm, dry bool, o database.RestoreOptions) (resultErr error) {
+	return s.restore(ctx, key, confirm, dry, o, nil, nil)
+}
+
+// prepare is reserved for the recovery drill's exclusively owned target. It
+// runs only after the same immutable snapshot has passed stored-byte verification.
+func (s *Service) restore(ctx context.Context, key string, confirm, dry bool, o database.RestoreOptions, prepare func(context.Context, metadata.Manifest) error, beforeWrite func() error) (resultErr error) {
 	var notificationManifest metadata.Manifest
 	notificationStart := s.now()
 	defer func() {
@@ -260,6 +266,11 @@ func (s *Service) Restore(ctx context.Context, key string, confirm, dry bool, o 
 	if m.Database.Engine != s.DB.Name() || m.Database.Format != s.DB.Format() {
 		return fault.Wrap(fault.Unsupported, "restore compatibility", fmt.Errorf("backup engine or format differs from configured adapter"))
 	}
+	if prepare != nil {
+		if err := prepare(ctx, m); err != nil {
+			return err
+		}
+	}
 	info, err := s.Test(ctx)
 	if err != nil {
 		return err
@@ -267,8 +278,14 @@ func (s *Service) Restore(ctx context.Context, key string, confirm, dry bool, o 
 	if err = s.DB.Compatible(info, m.Database.Version, m.ToolVersion); err != nil {
 		return fault.Wrap(fault.Unsupported, "restore compatibility", err)
 	}
+	s.stage("restore.compatibility", "complete")
 	if dry {
 		return nil
+	}
+	if beforeWrite != nil {
+		if err := beforeWrite(); err != nil {
+			return err
+		}
 	}
 	c, err := compression.New(m.Pipeline.Compression, m.Pipeline.Level)
 	if err != nil {
@@ -300,6 +317,11 @@ func (s *Service) Restore(ctx context.Context, key string, confirm, dry bool, o 
 	cancel()
 	pr.CloseWithError(fmt.Errorf("restore process finished"))
 	copyErr := <-done
+	// Cancellation used to stop the producer after a native restore failure is
+	// internal teardown, not evidence that the operator cancelled the drill.
+	if err != nil && ctx.Err() == nil && errors.Is(copyErr, context.Canceled) {
+		copyErr = nil
+	}
 	if err != nil || copyErr != nil {
 		return fault.Wrap(fault.Restore, "native restore", errors.Join(err, copyErr))
 	}
@@ -323,6 +345,28 @@ func (s *Service) notify(ctx context.Context, operation string, m metadata.Manif
 	defer cancel()
 	if e := s.Notifier.Send(nctx, event); e != nil && s.Logger != nil {
 		s.Logger.Warn("notification failed", "operation", operation, "error_category", "notification", "error", e)
+	}
+}
+
+func (s *Service) notifyBackup(ctx context.Context, m metadata.Manifest, err error, backupStatus string, verification VerificationResult) {
+	if s.Notifier == nil {
+		return
+	}
+	status := "completed"
+	message := ""
+	if err != nil {
+		status = "failed"
+		message = err.Error()
+	}
+	var postVerification *PostBackupVerificationError
+	if errors.As(err, &postVerification) {
+		message = "stored-artifact verification " + postVerification.Verification.Status + " (" + postVerification.Verification.FailureCategory + ")"
+	}
+	event := notify.Event{Operation: "backup", Status: status, BackupStatus: backupStatus, VerificationRequested: verification.Requested, VerificationStatus: verification.Status, VerificationEvidenceStatus: verification.EvidenceStatus, BackupID: m.ID, DatabaseType: s.Config.Database.Type, DatabaseName: s.Config.Database.Database, Size: m.Pipeline.Stored, Duration: m.Duration, Error: message}
+	nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if e := s.Notifier.Send(nctx, event); e != nil && s.Logger != nil {
+		s.Logger.Warn("notification failed", "operation", "backup", "error_category", "notification", "error", e)
 	}
 }
 func (s *Service) List(ctx context.Context, prefix string) ([]metadata.Manifest, error) {

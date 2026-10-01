@@ -137,6 +137,7 @@ func TestCloudProvidersAndSQLiteRestore(t *testing.T) {
 				t.Fatal(e)
 			}
 			cfg.Database = config.Database{Type: "sqlite", Database: path}
+			cfg.Protection = &config.Protection{VerifyAfterBackup: true}
 			adapter := &sqliteadapter.Adapter{Config: cfg.Database}
 			svc := &app.Service{Config: cfg, DB: adapter, Store: provider, Version: "integration"}
 			for _, codec := range []string{"none", "gzip", "zstd"} {
@@ -145,6 +146,23 @@ func TestCloudProvidersAndSQLiteRestore(t *testing.T) {
 				m, e := svc.Backup(ctx, "full", false)
 				if e != nil {
 					t.Fatal(e)
+				}
+				verificationHealth, readErr := svc.Health(ctx, false)
+				if readErr != nil || verificationHealth.Databases[0].Integrity != "verified" {
+					t.Fatal("cloud post-upload verification evidence", verificationHealth, readErr)
+				}
+				assertBackupHealth(t, ctx, svc, m)
+				drillTarget := filepath.Join(t.TempDir(), "cloud-recovery.sqlite")
+				drill, err := svc.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: drillTarget, Confirm: true, Cleanup: true})
+				if err != nil || drill.Status != "passed" || drill.TargetState != "removed" {
+					t.Fatal("cloud recovery drill", drill, err)
+				}
+				savedNow := svc.Now
+				svc.Now = func() time.Time { return drill.CompletedAt.Add(time.Second) }
+				health, err := svc.Health(ctx, false)
+				svc.Now = savedNow
+				if err != nil || health.Databases[0].RestoreTest != "passed" || health.Databases[0].RecoveryRecord != drill.RecordKey || health.Databases[0].Integrity != "verified" {
+					t.Fatal("cloud drill health evidence", health, err)
 				}
 				if _, e = db.Exec("DELETE FROM records"); e != nil {
 					t.Fatal(e)

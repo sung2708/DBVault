@@ -58,7 +58,7 @@ func TestInitMissingNativeDependency(t *testing.T) {
 	var out, stderr bytes.Buffer
 	root := New(Build{}, &out, &stderr)
 	root.SetIn(strings.NewReader(""))
-	root.SetArgs([]string{"init", "--non-interactive", "--database", "postgres", "--database-name", "prod", "--user", "backup", "--storage", "local", "--password-env", "DBVAULT_INIT_TEST_PASSWORD", "--config", path, "--test"})
+	root.SetArgs([]string{"init", "--non-interactive", "--database", "postgres", "--database-name", "prod", "--user", "backup", "--storage", "local", "--password-env", "DBVAULT_INIT_TEST_PASSWORD", "--native-tool-dir", filepath.Join(t.TempDir(), "missing"), "--config", path, "--test"})
 	err := root.Execute()
 	if fault.ExitCode(err) != 3 {
 		t.Fatal("expected dependency exit code", err)
@@ -95,7 +95,7 @@ func TestInitNonTTYAndSecrets(t *testing.T) {
 	var out, stderr bytes.Buffer
 	root := New(Build{}, &out, &stderr)
 	root.SetIn(strings.NewReader(""))
-	root.SetArgs([]string{"init", "--database", "postgres", "--database-name", "prod", "--user", "backup", "--storage", "local", "--config", path, "--no-color"})
+	root.SetArgs([]string{"init", "--database", "sqlite", "--database-name", filepath.Join(t.TempDir(), "app.db"), "--storage", "local", "--config", path, "--no-color"})
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}

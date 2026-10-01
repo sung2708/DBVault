@@ -108,6 +108,7 @@ func TestMongoDBBackupDestroyRestore(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
+			assertBackupHealth(t, ctx, svc, m)
 			if e = client.Database("source").Drop(ctx); e != nil {
 				t.Fatal(e)
 			}

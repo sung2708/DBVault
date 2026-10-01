@@ -2,6 +2,17 @@
 
 This guide outlines strategies and configurations for automating periodic database backups using DBVault.
 
+Use `dbvault health --output json` from an external monitor to check backup
+freshness independently of scheduling. Configure `health.max_backup_age` explicitly;
+saved cron expressions do not define an SLA. Health reads `.dbvault-schedules.json`
+(or `--state FILE`) and shows only definitions matching the selected config path.
+Fresh verified backups warn when all matching definitions are disabled. Enabled
+definitions do not prove the foreground daemon is running, and missed executions
+are not replayed. No matching definition says nothing about OS/external schedulers.
+Exit 0 is healthy; warning/critical/unknown are nonzero. Quiet keeps plain result
+data, so scripts that only need exit status can redirect stdout. See
+[health semantics and operational error codes](cli-reference.md#dbvault-health).
+
 ---
 
 ## 1. Scheduling Philosophy: Native Schedulers vs In-Process Daemon

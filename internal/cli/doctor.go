@@ -14,6 +14,7 @@ import (
 	"github.com/sung2708/DBVault/internal/doctor"
 	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/storage/providers"
+	"github.com/sung2708/DBVault/internal/toolresolve"
 )
 
 func (o *options) doctorCommand() *cobra.Command {
@@ -66,7 +67,7 @@ func (o *options) runDoctor(c *cobra.Command, timeout time.Duration) error {
 				}
 				var fe *fault.Error
 				if errors.As(preErr, &fe) && fe.Kind == fault.Dependency {
-					add("native_tools", "database", doctor.Fail, "Required native database tools are unavailable", o.redactor.Text(preErr.Error()), "Install the database vendor's client tools and add them to PATH.")
+					add("native_tools", "database", doctor.Fail, "Required native database tools are unavailable", o.redactor.Text(preErr.Error()), "Install the database vendor's client tools, then run dbvault init or configure database.tools.")
 				} else {
 					add("native_tools", "database", doctor.Skip, "Tool compatibility could not be confirmed", "Database preflight did not pass", "")
 				}
@@ -75,6 +76,11 @@ func (o *options) runDoctor(c *cobra.Command, timeout time.Duration) error {
 				detail := "Required native tools were found and version compatibility passed"
 				if db.Name() == "sqlite" {
 					detail = "SQLite uses its embedded driver; no external database tools are required"
+				} else if resolved, resolveErr := toolresolve.ResolveAll(cfg.Database.Type, cfg.Database.Tools, nil); resolveErr == nil {
+					detail += "; resolved executable paths:"
+					for _, name := range nativeToolOrder(cfg.Database.Type) {
+						detail += "\n  " + name + "  " + resolved[name]
+					}
 				}
 				add("native_tools", "database", doctor.Pass, "Database tooling is ready", detail, "")
 			}
@@ -121,6 +127,18 @@ func (o *options) runDoctor(c *cobra.Command, timeout time.Duration) error {
 	}
 	if !r.Ready {
 		return &doctor.ReadinessError{Report: r}
+	}
+	return nil
+}
+
+func nativeToolOrder(engine string) []string {
+	switch engine {
+	case "postgres":
+		return []string{"pg_dump", "pg_restore", "psql"}
+	case "mysql":
+		return []string{"mysqldump", "mysql"}
+	case "mongodb":
+		return []string{"mongodump", "mongorestore"}
 	}
 	return nil
 }

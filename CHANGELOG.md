@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-10-02
+
+### Added
+- Optional `protection.verify_after_backup` reads completed stored artifacts back
+  through the shared streaming size/SHA-256 verifier, preserves artifacts on
+  verification failure and appends exact-backup immutable evidence consumed by
+  Health/Status. Full cloud reads and request/egress costs are documented.
+- `dbvault status` aggregates existing health, recent backup metadata, recovery
+  evidence, storage type and advisory saved schedules. No archive hashing,
+  database connection, restore or recovery drill runs by default.
+- `dbvault init` displays OS-specific instructions for setting the configured
+  database password environment variable in the current terminal, including
+  hidden/masked prompts on macOS/Linux and Windows PowerShell.
+- `dbvault init` discovers PostgreSQL, MySQL and MongoDB tools in `PATH` and
+  supported known installation directories, validates version commands, and
+  saves absolute paths for later doctor/test/backup/restore operations. Adds
+  `--native-tool-dir` for explicit complete toolsets; SQLite remains embedded.
+- `dbvault recovery drill` for SQLite backups: verified snapshot reuse, exclusively
+  created isolated target, structural post-restore validation, dry-run, explicit
+  owned-file cleanup, separate recovery records and exact-backup health evidence.
+  Native server engines fail closed until safe isolation is implemented/tested.
+- `dbvault health` with explicit `health.max_backup_age` policy, latest-backup
+  availability/size evidence, stale detection, JSON and monitoring exit status.
+  Optional `--verify` checks only the latest matching archive's size/SHA-256;
+  default checks never read archive contents. Verify and health --verify results
+  are persisted as immutable exact-backup evidence. Saved schedule state is advisory;
+  checksum success never implies a passed recovery drill.
+
 ## [v0.2.0] - 2026-10-01
 
 ### Added
