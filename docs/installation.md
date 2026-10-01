@@ -1,0 +1,205 @@
+# Installation Guide
+
+This document describes how to install DBVault, configure native database dependencies across supported operating systems, and verify your environment.
+
+Go 1.26+ is required to build the current implementation. No binary release has
+been published by this change. The prepared tag-triggered release workflow builds
+Linux amd64/arm64, macOS amd64/arm64 and Windows amd64, injecting the real tag,
+commit and UTC build time into `dbvault version`. It publishes archives only when
+maintainers push a release tag. Native database tools are not included in those
+archives. Docker runtime targets provide PostgreSQL client 16, MySQL 8.4 clients,
+MongoDB Database Tools, or embedded SQLite; choose the target for your engine.
+
+## Install with Go
+
+```bash
+go install github.com/sung2708/DBVault/cmd/dbvault@latest
+dbvault --help
+dbvault version
+```
+
+The `/cmd/dbvault` package is intentional: the module root is not an executable.
+Pin a published version with `@vX.Y.Z`. `go install` places `dbvault` (Windows:
+`dbvault.exe`) in `GOBIN`, or `GOPATH/bin` if unset; add that directory to `PATH`.
+Unpublished checkout changes cannot be obtained via `@latest`. For local changes
+use `go install ./cmd/dbvault` inside the checkout.
+
+## Prebuilt archives
+
+Published assets are listed at [GitHub Releases](https://github.com/sung2708/DBVault/releases).
+The prepared workflow produces `dbvault_vX.Y.Z_OS_ARCH.tar.gz` (Windows `.zip`),
+each containing the executable, README.md and LICENSE. Download `checksums.txt`
+alongside your archive; from that directory run
+`sha256sum -c checksums.txt --ignore-missing`. PowerShell users can compare
+`Get-FileHash ARCHIVE -Algorithm SHA256` with the matching manifest entry.
+Prebuilt binaries do not require Go; native database tools still apply.
+
+`version` uses explicit release linker metadata when supplied. Module installs
+report Go's module version. Source builds report `dev` and available VCS revision,
+including `-dirty` for modified checkouts. Without a linker build date, Built is
+`unknown`; a commit timestamp is not presented as a build timestamp.
+
+---
+
+## 1. Overview & Architecture Dependency Note
+
+> [!IMPORTANT]
+> **Native Tool Dependency:**
+> Standalone DBVault binaries use native logical dump/restore tools for PostgreSQL, MySQL and MongoDB. Install those clients in `PATH`, or use the matching Docker runtime target. SQLite uses the embedded driver and needs no client executable.
+
+---
+
+## 2. System Requirements
+
+- **Supported Operating Systems:**
+  - Linux (Ubuntu, Debian, RHEL, CentOS, Alpine)
+  - macOS (Apple Silicon & Intel)
+  - Windows (Windows 10, 11, Windows Server 2019/2022)
+- **Go Version:** Go 1.26 or higher (to compile from source).
+
+---
+
+## 3. Installing Native Database Tools
+
+### 3.1 PostgreSQL Tools (`pg_dump`, `pg_restore`, `psql`)
+
+#### Linux (Debian / Ubuntu):
+```bash
+sudo apt-get update
+sudo apt-get install -y postgresql-client
+```
+
+#### Linux (RHEL / Fedora / AlmaLinux):
+```bash
+sudo dnf install -y postgresql
+```
+
+#### macOS (Homebrew):
+```bash
+brew install libpq
+# Add libpq to PATH if keg-only:
+echo 'export PATH="/opt/homebrew/opt/libpq/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+#### Windows:
+1. Download the official PostgreSQL installer from [postgresql.org](https://www.postgresql.org/download/windows/).
+2. During installation, ensure the **Command Line Tools** component is selected.
+3. Add the PostgreSQL `bin` directory to your System `Path` environment variable:
+   ```text
+   C:\Program Files\PostgreSQL\16\bin
+   ```
+4. Verify in PowerShell:
+   ```powershell
+   pg_dump --version
+   psql --version
+   ```
+
+---
+
+### 3.2 MySQL Tools (`mysqldump`, `mysql`)
+
+#### Linux (Debian / Ubuntu):
+```bash
+sudo apt-get update
+sudo apt-get install -y default-mysql-client
+```
+
+#### Linux (RHEL / Fedora):
+```bash
+sudo dnf install -y mysql
+```
+
+#### macOS (Homebrew):
+```bash
+brew install mysql-client
+echo 'export PATH="/opt/homebrew/opt/mysql-client/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+#### Windows:
+1. Download MySQL Community Server or MySQL Shell from [dev.mysql.com](https://dev.mysql.com/downloads/installer/).
+2. Add the MySQL `bin` directory to System `Path`:
+   ```text
+   C:\Program Files\MySQL\MySQL Server 8.0\bin
+   ```
+3. Verify in PowerShell:
+   ```powershell
+   mysqldump --version
+   mysql --version
+   ```
+
+---
+
+### 3.3 MongoDB Tools (`mongodump`, `mongorestore`)
+
+Install Database Tools 100.x; use the same tools version for dump and restore:
+- **Ubuntu/Debian:** Install the official Database Tools package using
+  [MongoDB's installation instructions](https://www.mongodb.com/docs/database-tools/installation/installation/).
+- **macOS:** `brew install mongodb-database-tools`
+- **Windows:** Download MongoDB Database Tools MSI from mongodb.com.
+
+---
+
+### 3.4 SQLite
+
+The binary embeds a pure Go SQLite driver. No external `sqlite3` installation
+is required. Both source and restore destination files must already exist.
+
+### 3.5 Docker targets
+
+`docker build --target postgres -t dbvault:postgres .` builds the default image.
+Use `--target mysql`, `mongodb` or `sqlite` for other engines. Native client
+versions are tied to their base image: PostgreSQL 16, MySQL 8.4, MongoDB 8.0
+Database Tools. Every runtime uses a non-root user. Mount a config, private
+backup directory and any SQLite database with permissions for that user.
+Set credentials by environment variable name/secret injection. Images have not
+been published. For builds, `VERSION`, `COMMIT` and `BUILD_DATE` are optional
+build arguments; their defaults identify development builds.
+
+To package an already cross-compiled Linux binary, Buildx can override the build
+stage with a named context:
+`docker build --build-context build=bin/linux-amd64 --target postgres -t dbvault:postgres .`
+The context directory must contain the executable named `dbvault` for the image's
+architecture. This route was used to smoke-test all four final runtime targets.
+
+---
+
+## 4. Building DBVault from Source
+
+Clone the repository and compile using Go:
+
+```bash
+# Clone the repository
+git clone https://github.com/sung2708/DBVault.git
+cd DBVault
+
+# Build the executable
+go mod download
+go test ./...
+go build -ldflags="-s -w" -o bin/dbvault ./cmd/dbvault
+```
+
+### Installing Binary into System PATH
+
+#### Linux / macOS:
+```bash
+sudo install -m 0755 bin/dbvault /usr/local/bin/dbvault
+```
+
+#### Windows:
+Place `dbvault.exe` into a directory that is in your system `Path` (such as `C:\Windows\System32` or a dedicated `C:\Tools\bin` directory).
+
+---
+
+## 5. Verification
+
+Verify that DBVault is correctly installed and all dependencies are registered:
+
+```bash
+# Check version
+dbvault version
+
+# Run self-check on database tools
+dbvault test --config dbvault.yaml
+```

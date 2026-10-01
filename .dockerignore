@@ -1,0 +1,9 @@
+.git
+.tmp-build
+bin
+backups
+coverage.out
+coverage.html
+dbvault.yaml
+.dbvault-schedules.json
+.dbvault-schedules.json.lock

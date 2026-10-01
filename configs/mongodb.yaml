@@ -1,0 +1,20 @@
+version: "1"
+database:
+  type: mongodb
+  host: 127.0.0.1
+  port: 27017
+  user: backup_operator
+  password_env: DB_PASSWORD
+  database: dbvault_test
+  auth_database: admin
+  ssl_mode: require
+  options:
+    # This acknowledges that YOU stop writes throughout the dump.
+    quiesced: true
+storage:
+  type: local
+  local:
+    path: ./backups
+compression:
+  type: zstd
+  level: 6

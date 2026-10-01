@@ -1,0 +1,15 @@
+version: "1"
+database:
+  type: sqlite
+  database: ./demo.sqlite
+storage:
+  type: s3
+  s3:
+    bucket: my-backup-bucket
+    region: us-east-1
+    prefix: dbvault/sqlite
+    # Omit custom env fields to use AWS's default credential chain.
+    encryption: AES256
+compression:
+  type: zstd
+  level: 6

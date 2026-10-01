@@ -1,0 +1,16 @@
+version: "1"
+database:
+  type: mysql
+  host: 127.0.0.1
+  port: 3306
+  user: backup_operator
+  password_env: DB_PASSWORD
+  database: application
+  ssl_mode: require
+storage:
+  type: local
+  local:
+    path: ./backups
+compression:
+  type: gzip
+  level: 6

@@ -1,0 +1,14 @@
+version: "1"
+database:
+  type: sqlite
+  database: ./demo.sqlite
+storage:
+  type: azure
+  azure:
+    container: dbvault-backups
+    account_name: mybackupaccount
+    prefix: dbvault/sqlite
+    # Omit account_key_env to use DefaultAzureCredential/managed identity.
+compression:
+  type: zstd
+  level: 6

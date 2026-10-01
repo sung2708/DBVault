@@ -1,0 +1,11 @@
+version: "1"
+database:
+  type: sqlite
+  database: ./demo.sqlite
+storage:
+  type: local
+  local:
+    path: ./backups
+compression:
+  type: gzip
+  level: 6

@@ -1,0 +1,14 @@
+# Development only. No database ports are exposed. Integration tests create
+# their own isolated containers and do not require this persistent service.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: dbvault_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: development-only-db-vault-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dbvault_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

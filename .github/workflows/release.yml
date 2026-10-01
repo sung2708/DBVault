@@ -1,0 +1,92 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Require an intentional stable SemVer tag and prepared changelog
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
+          grep -F "## [$GITHUB_REF_NAME]" CHANGELOG.md
+          test -z "$(gofmt -l cmd internal test)"
+      - run: go mod verify
+      - run: go mod tidy && git diff --exit-code -- go.mod go.sum
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go test -race ./...
+      - run: go test -v -timeout=20m -tags=integration ./test/integration/...
+  archives:
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - linux/amd64
+          - linux/arm64
+          - darwin/amd64
+          - darwin/arm64
+          - windows/amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: Build and package actual tag metadata
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          CGO_ENABLED: '0'
+        run: |
+          export GOOS="${TARGET%/*}" GOARCH="${TARGET#*/}"
+          built="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          suffix=""; if [ "$GOOS" = windows ]; then suffix=.exe; fi
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X main.version=$GITHUB_REF_NAME -X main.commit=$GITHUB_SHA -X main.buildDate=$built" -o "dist/dbvault$suffix" ./cmd/dbvault
+          cp LICENSE README.md dist/
+          name="dbvault_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}"
+          if [ "$GOOS" = windows ]; then (cd dist && zip "$name.zip" "dbvault$suffix" README.md LICENSE); else tar -C dist -czf "dist/$name.tar.gz" "dbvault$suffix" README.md LICENSE; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ strategy.job-index }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+  publish:
+    needs: archives
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: actions/checkout@v4
+        with:
+          path: source
+      - name: Attach release archives and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+          {
+            printf '# DBVault %s\n\n' "$GITHUB_REF_NAME"
+            awk -v heading="## [$GITHUB_REF_NAME]" 'index($0,heading)==1 {active=1;next} active && /^## / {exit} active {print}' source/CHANGELOG.md
+            printf '\n## Installation\n\n```bash\ngo install github.com/sung2708/DBVault/cmd/dbvault@%s\ndbvault version\ndbvault --help\n```\n' "$GITHUB_REF_NAME"
+            printf '\nNative PostgreSQL/MySQL/MongoDB tools must be installed separately. SQLite needs no native executable.\n'
+            printf '\n## Checksums / Artifacts\n\nDownload the archive for your platform and checksums.txt; verify with `sha256sum -c checksums.txt --ignore-missing`. Archives contain the executable, README.md and LICENSE.\n'
+          } > release-notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "DBVault $GITHUB_REF_NAME" --notes-file release-notes.md

@@ -1,0 +1,13 @@
+version: "1"
+database:
+  type: sqlite
+  database: ./demo.sqlite
+storage:
+  type: gcs
+  gcs:
+    bucket: my-backup-bucket
+    prefix: dbvault/sqlite
+    # Omit credentials_file_env to use Application Default Credentials.
+compression:
+  type: zstd
+  level: 6

@@ -1,0 +1,59 @@
+name: CI
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Formatting
+        run: test -z "$(gofmt -l cmd internal test)"
+      - run: go vet ./...
+      - run: go mod verify
+      - name: Module hygiene
+        run: go mod tidy && git diff --exit-code -- go.mod go.sum
+      - run: go test -coverprofile=coverage.out ./...
+      - run: go test -race ./...
+      - run: go run ./cmd/dbvault config --config configs/example.yaml
+      - name: Installed CLI works outside the source tree
+        run: |
+          export GOBIN="$RUNNER_TEMP/dbvault-bin"
+          go install ./cmd/dbvault
+          cd "$RUNNER_TEMP"
+          "$GOBIN/dbvault" --help
+          "$GOBIN/dbvault" version --output json
+      - name: Database and cloud emulator backup-destroy-restore drills
+        run: go test -v -timeout=20m -tags=integration ./test/integration/...
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: windows
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: darwin
+            arch: amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build ./cmd/dbvault
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'

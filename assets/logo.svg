@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 180" role="img" aria-labelledby="title desc">
+  <title id="title">DBVault</title>
+  <desc id="desc">DBVault database backup and restore CLI, built with Go.</desc>
+  <defs>
+    <linearGradient id="dbv-cyan" x1="28" y1="27" x2="139" y2="153" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#0EA5A8"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(10 10)">
+    <path d="M31 20h52c31.5 0 57 25.5 57 57v6c0 31.5-25.5 57-57 57H31c-6.1 0-11-4.9-11-11V31c0-6.1 4.9-11 11-11Z" fill="#0B1F33"/>
+    <path d="M46 43h35c16 0 29 7.6 29 17s-13 17-29 17H46V43Zm0 40h39c16 0 29 7.6 29 17s-13 17-29 17H46V83Z" fill="url(#dbv-cyan)"/>
+    <path d="M82 52c20 0 36 12.5 36 28v18.5" fill="none" stroke="#A5F3FC" stroke-width="7" stroke-linecap="round"/>
+    <path d="m106 92 12 13 12-13" fill="none" stroke="#A5F3FC" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M84 108H58" fill="none" stroke="#ECFEFF" stroke-width="6" stroke-linecap="round" opacity=".92"/>
+  </g>
+  <text x="180" y="108" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="72" font-weight="750" letter-spacing="-3" fill="#0B1F33"><tspan fill="#0EA5A8">DB</tspan><tspan>Vault</tspan></text>
+  <text x="184" y="139" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="600" letter-spacing="3.2" fill="#52677D">BACKUP · VERIFY · RESTORE</text>
+</svg>
