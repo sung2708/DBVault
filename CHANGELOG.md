@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v0.3.0] - 2026-10-02
+## [v0.3.1] - 2026-10-02
 
 ### Added
 - Optional `protection.verify_after_backup` reads completed stored artifacts back
@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default checks never read archive contents. Verify and health --verify results
   are persisted as immutable exact-backup evidence. Saved schedule state is advisory;
   checksum success never implies a passed recovery drill.
+
+### Fixed
+- Use a host-native absolute path in the native-tool configuration test so the
+  coverage suite passes on Linux, macOS and Windows.
 
 ## [v0.2.0] - 2026-10-01
 

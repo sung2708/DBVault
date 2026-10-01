@@ -79,12 +79,16 @@ func TestLoadFailures(t *testing.T) {
 }
 
 func TestNativeToolPathsValidateAndRoundTrip(t *testing.T) {
-	valid := strings.Replace(example, "  database: original", "  database: original\n  tools:\n    pg_dump: 'C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe'\n    pg_restore: 'C:\\Program Files\\PostgreSQL\\18\\bin\\pg_restore.exe'\n    psql: 'C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe'", 1)
+	toolDir := filepath.Join(t.TempDir(), "Program Files", "PostgreSQL", "18", "bin")
+	pgDump := filepath.Join(toolDir, "pg_dump")
+	pgRestore := filepath.Join(toolDir, "pg_restore")
+	psql := filepath.Join(toolDir, "psql")
+	valid := strings.Replace(example, "  database: original", "  database: original\n  tools:\n    pg_dump: '"+pgDump+"'\n    pg_restore: '"+pgRestore+"'\n    psql: '"+psql+"'", 1)
 	c, err := Load(write(t, valid), Overrides{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Database.Tools["pg_dump"] != `C:\Program Files\PostgreSQL\18\bin\pg_dump.exe` {
+	if c.Database.Tools["pg_dump"] != pgDump {
 		t.Fatalf("path changed: %q", c.Database.Tools["pg_dump"])
 	}
 	for _, tools := range []string{"    pg_dump: pg_dump.exe\n", "    mysql: /usr/bin/mysql\n", "    pg_dump: ' \\\\server\\share\\pg_dump.exe'\n"} {
