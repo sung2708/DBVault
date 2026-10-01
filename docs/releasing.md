@@ -56,6 +56,12 @@ vMAJOR.MINOR.PATCH
 
 Examples: `v0.1.0`, `v0.2.0`, `v0.2.1`, `v1.0.0`, `v1.1.0`, `v2.0.0`.
 
+`dbvault update check` reads GitHub's official [latest release endpoint](https://docs.github.com/en/rest/releases/releases?apiVersion=latest).
+GitHub excludes drafts and prereleases from that stable endpoint; DBVault also
+validates the returned SemVer tag and official release URL before showing update
+instructions. Development builds are not compared. Publishing code changes,
+tags or releases remains an explicit maintainer action.
+
 ### Rules by Release Type
 
 | Level | Scope | Criteria |

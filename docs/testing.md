@@ -4,6 +4,23 @@ This document details the testing architecture, validation commands, integration
 
 ## Implemented test harness
 
+Setup tests inject a fake Prompter for all database/storage combinations, partial
+flags, existing-file approval/cancel, transient password redaction and failed tests.
+Config writer tests cover concurrent no-overwrite publication, private permissions,
+cancel cleanup and rejection of nonregular destinations. CLI acceptance creates
+a real SQLite database, generates YAML non-interactively, loads it with the runtime
+loader, and reuses the ordinary connection test. Non-TTY/JSON/quiet paths must not
+read stdin or leak secrets. These tests require no real keyboard or cloud credentials.
+
+Update-check tests use a local HTTP server: SemVer ordering, dev/unknown versions,
+stable-only release validation, malformed/rate-limited responses, timeout and
+cancellation, plus cache hits, expiry, force refresh and corrupted cache recovery.
+They never depend on live GitHub availability.
+
+`doctor` tests cover warning-versus-failure readiness aggregation and CLI JSON
+reports with a real SQLite database, safe local/temp-file probes and structured
+failure output. It never requires cloud credentials or sends Slack notifications.
+
 `go test ./...` covers configuration precedence/schema, capabilities, secure
 command vectors, secret redaction, metadata/versioning/naming, compression,
 SHA-256, local storage/traversal, retention, CLI guards and pipeline failures.

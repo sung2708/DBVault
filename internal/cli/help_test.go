@@ -47,10 +47,13 @@ func TestHelpTreeDiscoverability(t *testing.T) {
 						t.Errorf("missing %q in %s", content, text)
 					}
 				}
-				for _, forbidden := range []string{"help-secret-password", "help-secret-cloud", "\x1b[", "--skip-verify", "--storage", "--yes"} {
+				for _, forbidden := range []string{"help-secret-password", "help-secret-cloud", "\x1b[", "--skip-verify", "--yes"} {
 					if strings.Contains(text, forbidden) {
 						t.Errorf("unexpected %q in help", forbidden)
 					}
+				}
+				if len(path) > 0 && path[0] != "init" && strings.Contains(text, "--storage") {
+					t.Error("storage flag is only supported by init")
 				}
 				if stderr.Len() != 0 {
 					t.Errorf("help wrote stderr: %s", stderr.String())
@@ -74,7 +77,7 @@ func TestRootAndParentNavigation(t *testing.T) {
 	if err := r.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Core Commands:", "Operations:", "Configuration:", "Other:", "dbvault.yaml", "backup", "restore", "verify", "inspect", "list", "delete", "cleanup", "test", "config", "schedule", "version", "help"} {
+	for _, text := range []string{"Core Commands:", "Operations:", "Configuration:", "Other:", "dbvault.yaml", "backup", "restore", "verify", "inspect", "list", "delete", "cleanup", "test", "config", "schedule", "version", "update", "doctor", "help"} {
 		if !strings.Contains(out.String(), text) {
 			t.Errorf("missing root navigation %q", text)
 		}

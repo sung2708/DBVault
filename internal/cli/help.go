@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/sung2708/DBVault/internal/doctor"
 	"github.com/sung2708/DBVault/internal/fault"
 )
 
@@ -59,7 +62,7 @@ func applyCommandHelp(c *cobra.Command) {
 		"delete":  {"Delete one backup archive and its metadata", "Permanently delete a backup selected by --target from configured storage.\nUse a name from dbvault list. Preview with --dry-run; deletion requires --confirm.\nThis removes the archive and manifest, not data in the source database.", "  dbvault delete --target backup.dump.gz --dry-run\n  dbvault delete --target backup.dump.gz --confirm", "operations"},
 		"cleanup": {"Delete backups outside retention protections", "Apply configured retention to backups in the storage backend. Backups protected\nby either age or count are kept; the newest per database is always protected.\nBoth policies set to zero disable deletion.\n\nPreview with --dry-run. Without it, cleanup deletes candidates immediately:\nthere is no confirmation flag. All registered archives are verified first.", "  dbvault cleanup --dry-run\n  dbvault cleanup --keep-days 30 --keep-count 7 --dry-run\n  dbvault cleanup --keep-days 30 --keep-count 7", "operations"},
 		"test":    {"Check tools and database connectivity", "Check database connectivity and version compatibility, including native tools\nwhere required. SQLite checks the configured database file. Credentials come\nfrom the environment variables named in configuration.\n\nNo backup or storage connection is created. Next, try backup --dry-run.", "  dbvault test\n  dbvault test --config production.yaml --timeout 1m", "operations"},
-		"config":  {"Validate a YAML configuration file", "Validate configuration schema and supported option values without connecting\nto a database or storage. This does not check credentials or print configuration.\nChoose local, s3, gcs or azure with storage.type in YAML.\n\nNext, run test to check database connectivity. This command has no subcommands.", "  dbvault config\n  dbvault config --config production.yaml", "configuration"},
+		"config":  {"Validate a YAML configuration file", "Validate configuration schema and supported option values without connecting\nto a database or storage. This does not check credentials or print configuration.\nChoose local, s3, gcs or azure with storage.type in YAML.\n\nTo create a configuration, use init. Next, run test to check database connectivity.\nThis command has no subcommands.", "  dbvault config\n  dbvault config --config production.yaml", "configuration"},
 	}[c.Name()]
 	c.Short, c.Long, c.Example, c.GroupID = h.short, h.long, h.examples, h.group
 	switch c.Name() {
@@ -117,6 +120,14 @@ func validateCLIValues(c *cobra.Command, _ []string) error {
 
 // WriteError retains the typed error for exit status; only presentation changes.
 func WriteError(w io.Writer, c *cobra.Command, err error) {
+	var readiness *doctor.ReadinessError
+	if errors.As(err, &readiness) && !jsonMode(c) {
+		return
+	}
+	if c.Name() == "init" && errors.Is(err, context.Canceled) && !jsonMode(c) {
+		fmt.Fprintln(w, "Setup cancelled.")
+		return
+	}
 	// Main and embedded callers can supply a distinct diagnostic destination.
 	c.SetErr(w)
 	r := errorDisplay(c)

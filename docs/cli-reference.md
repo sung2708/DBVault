@@ -15,6 +15,13 @@ animation; `--quiet` suppresses progress and hints while keeping data/errors.
 See [terminal output](terminal-ui.md) for progress semantics and examples.
 
 `dbvault config` validates the configuration schema without network access.
+`dbvault doctor` checks readiness using authenticated database preflight and
+storage read access. It performs no database writes or cloud object writes/deletes;
+Slack delivery is never tested. Warnings do not fail readiness, but failed required
+checks return exit code 1. Use `--json` for the structured report.
+`dbvault init` creates configuration with optional interactive setup or flags.
+`dbvault update check` checks official release metadata and prints safe update
+instructions; it never downloads or installs a binary.
 `dbvault verify --target KEY` hashes stored bytes and checks metadata size/hash.
 `dbvault inspect --target KEY` reads validated metadata without hashing bytes.
 `dbvault delete --target KEY --confirm` unregisters and deletes a backup;
@@ -46,6 +53,85 @@ All commands inherit the following root flags:
 - `3`: Native tool dependency missing from PATH.
 - `4`: Checksum integrity verification failed.
 - `5`: Execution canceled (SIGINT / SIGTERM / Timeout).
+
+---
+
+## `dbvault doctor`
+
+Run readiness checks before the first backup. Doctor validates configuration,
+checks authenticated database connectivity and required native-tool compatibility,
+verifies local storage readability/writeability or makes a narrow cloud list
+request, and confirms that the OS temporary directory accepts a removable probe.
+Where supported it reports currently available temporary-disk bytes; it does not
+estimate how much a particular backup will need. A missing local output directory
+is not created during diagnosis.
+
+Doctor does not create database objects, backups, or cloud objects. It does not
+test cloud write/delete permissions or send Slack messages. Enabled Slack is only
+checked for a configured webhook environment variable. Warnings are advisory;
+failed required checks return exit code 1. Cancellation or timeout returns 5.
+
+```text
+dbvault doctor [--config FILE] [--timeout DURATION] [--json]
+```
+
+`--timeout` defaults to 30 seconds and applies to the full readiness run. The JSON
+report has `ready`, `summary` counts and a `checks` array with stable names,
+categories, statuses, safe summaries, details and remediation hints.
+
+---
+
+## `dbvault init`
+
+Create a configuration with inline keyboard prompts, or supply complete flags
+to skip interaction. Default destination: `dbvault.yaml` in the current directory.
+No existing config is needed. The generated file uses the runtime schema and
+passes its validation before any write.
+
+```bash
+dbvault init
+dbvault init --database postgres --storage local
+dbvault init --non-interactive --database sqlite --database-name ./app.db --storage local
+dbvault init --non-interactive --database postgres --database-name production --user dbvault --storage s3 --bucket backups --region us-east-1 --config ./production.yaml
+```
+
+| Flags | Meaning |
+|---|---|
+| `--database`, `--storage`, `--database-name` | Required engine, backend and database name/file |
+| `--user` | Required for PostgreSQL/MySQL/MongoDB |
+| `--host`, `--port` | Runtime host and engine-specific port defaults |
+| `--password-env` | Environment variable name; default `DBVAULT_DB_PASSWORD`; no password flag |
+| `--ssl-mode` | Default `prefer` for PostgreSQL/MySQL; `require` for MongoDB |
+| `--auth-database`, `--quiesced` | MongoDB authentication DB (default `admin`) and stopped-writes acknowledgement |
+| `--output-dir` | Local directory; default `./backups` |
+| `--bucket`, `--region` | S3 requires both; GCS requires bucket |
+| `--container`, `--account-name` | Required Azure settings |
+| `--prefix` | Optional cloud object prefix |
+| `--compression` | gzip (runtime default), zstd or none |
+| `--non-interactive` | Never prompt; fail on missing required flags |
+| `--force` | Authorize replacing an existing regular configuration file |
+| `--test`, `--timeout` | Optional database/native-tool test before writing; timeout defaults to 30s and must be positive |
+
+An explicit flag skips its question. When any required field is missing and both
+stdin and stderr are terminals, setup asks for missing values and optional settings.
+Complete required flags skip all prompts and use defaults for unspecified options.
+Non-TTY input, JSON output and quiet mode never prompt. JSON emits one result
+record on stdout; errors remain structured stderr records through the normal CLI.
+
+Existing files fail without `--force` when prompts are disabled. Interactive
+setup offers cancel, a summary of existing configuration, or overwrite; no merge.
+Esc/Ctrl+C cancel with exit code 5. Invalid settings return exit code 1. No partial
+file is left by cancellation before publication. The parent directory must exist.
+
+`--test` reuses the ordinary test service, checks database/native tools, and does
+not contact storage. Non-interactive tests require the referenced password variable.
+Interactive tests may request a masked temporary password without saving it.
+Failed tests require interactive approval to save anyway; automation fails without
+writing. Native PostgreSQL/MySQL/MongoDB tools are separate prerequisites.
+
+Cloud credentials use the AWS default chain, Google ADC or Azure default identity.
+Setup does not ask for cloud secrets, create buckets or check their permissions.
+Use the generated file with normal config/test/backup/list/restore commands.
 
 ---
 
@@ -214,7 +300,34 @@ dbvault version 0.1.0 (commit: e9a1bf0, built: 2026-10-01, runtime: go1.26.5)
 
 ---
 
-## 7. `dbvault schedule`
+## 7. `dbvault update check`
+
+Checks GitHub's official latest published stable DBVault release. The check
+compares SemVer versions, ignores development builds and never suggests a
+downgrade. Finding an update is a successful check and does not install it.
+
+```bash
+dbvault update --help
+dbvault update check
+dbvault update check --force
+dbvault update check --output json
+dbvault update check --no-color
+```
+
+`--force` bypasses the 24-hour metadata cache. The cache contains only public
+release version, URL and check time in the operating system's user cache
+directory. Successful JSON results go to stdout and structured failures go to
+stderr; network/API failure is exit code 2, cancellation is exit code 5.
+`dev` builds report development status without making a network request. The
+command only contacts GitHub's official release API and sends no database,
+storage, credential or machine identity data. It does not download assets,
+modify PATH, invoke package managers or replace the running executable.
+
+Prebuilt installs should open the official release page and select the matching
+platform archive. Go module installs can run the explicit versioned command
+shown by the checker. `dbvault version` remains local and works offline.
+
+## 8. `dbvault schedule`
 
 The foreground daemon accepts `--cron` and a configuration path, or loads
 definitions from `--state` (default `.dbvault-schedules.json`). External

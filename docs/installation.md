@@ -2,8 +2,8 @@
 
 This document describes how to install DBVault, configure native database dependencies across supported operating systems, and verify your environment.
 
-Go 1.26+ is required to build the current implementation. No binary release has
-been published by this change. The prepared tag-triggered release workflow builds
+Go 1.26+ is required to build the current implementation. Release `v0.2.0`
+includes the latest published binary archives; the tag-triggered workflow builds
 Linux amd64/arm64, macOS amd64/arm64 and Windows amd64, injecting the real tag,
 commit and UTC build time into `dbvault version`. It publishes archives only when
 maintainers push a release tag. Native database tools are not included in those
@@ -16,6 +16,7 @@ MongoDB Database Tools, or embedded SQLite; choose the target for your engine.
 go install github.com/sung2708/DBVault/cmd/dbvault@latest
 dbvault --help
 dbvault version
+dbvault update check
 ```
 
 The `/cmd/dbvault` package is intentional: the module root is not an executable.
@@ -23,6 +24,13 @@ Pin a published version with `@vX.Y.Z`. `go install` places `dbvault` (Windows:
 `dbvault.exe`) in `GOBIN`, or `GOPATH/bin` if unset; add that directory to `PATH`.
 Unpublished checkout changes cannot be obtained via `@latest`. For local changes
 use `go install ./cmd/dbvault` inside the checkout.
+
+`dbvault update check` compares the installed version with GitHub's latest
+published stable DBVault release and prints the exact versioned `go install`
+command plus the official release page. Prebuilt binary users can use that page
+to choose an asset for their platform. The checker reads release metadata only;
+it never downloads or replaces a binary. A successful result is cached in the
+user cache directory for 24 hours; pass `--force` to check again immediately.
 
 ## Prebuilt archives
 

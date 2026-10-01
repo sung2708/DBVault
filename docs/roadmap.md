@@ -9,8 +9,8 @@ This document outlines the phased development roadmap for DBVault, based on an a
 The repository implements all four database engines and storage providers,
 Slack, retention and persistent cron schedules. See
 [verified status](implementation-status.md) for executed checks. Incremental and
-differential recovery chains, client-side encryption, live-cloud validation and
-published releases remain separate future work.
+Incremental/differential recovery chains, client-side encryption and live-cloud
+validation remain separate future milestones.
 
 ### Available in Phase 0:
 - [x] Comprehensive architectural blueprint and pipeline design.

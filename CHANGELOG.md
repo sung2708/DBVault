@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+## [v0.2.0] - 2026-10-01
+
+### Added
+- `dbvault doctor` for secret-safe readiness checks of configuration, authenticated
+  database/tool compatibility, storage access and temporary-directory usability.
+  Cloud write/delete permissions and Slack delivery are never tested.
+- `dbvault update check` for cached checks against the official latest stable
+  GitHub release, with safe update instructions and machine-readable output.
+- `dbvault init` with optional inline setup, flags-only automation, supported
+  database/storage choices, environment password references, configuration review,
+  optional database/tool testing and protected atomic YAML creation.
+
 ## [v0.1.0] - 2026-10-01
 
 ### Added

@@ -5,6 +5,24 @@ command discovery; `internal/presentation` uses Lip Gloss for restrained cyan
 headings and semantic status colors. Core `internal/app` emits neutral events
 without importing terminal libraries. No backup/restore semantics are changed.
 
+`init` adds optional inline forms through Charm Huh in the presentation layer.
+The onboarding workflow uses an injected Prompter interface, without terminal
+dependencies. Questions support arrows/Enter, Esc and Ctrl+C, with masked secret
+input for temporary connection tests. No alternate-screen dashboard or mouse UI
+is used. `TERM=dumb` falls back to numbered choices, yes/no and plain input.
+Prompt/review messages go to stderr; final results go to stdout. Existing commands
+keep their flags and destructive-operation guards; no restore selection is added.
+
+Both stdin and stderr must be terminals to prompt. Complete required flags,
+`--non-interactive`, JSON and quiet mode bypass prompts. `--no-color` and
+`NO_COLOR` suppress prompt colors; keyboard controls still function. A setup
+cancellation restores terminal state and leaves the destination unchanged.
+
+`update check` renders stable release status through the same renderer. It uses
+the semantic success/warning/error colors, shows a versioned Go install command
+only for validated official stable tags, and never animates redirected or JSON
+output. Failures stay concise and nonzero; `dev` builds skip network access.
+
 Results and requested data go to stdout. Progress, warnings and errors go to
 stderr. Human terminals show status icons and borderless tables; narrow terminals
 use wrapped labeled records so backup names and paths remain available. Redirecting

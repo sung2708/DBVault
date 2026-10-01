@@ -1,7 +1,46 @@
 # Verified implementation status
 
-Development snapshot on 2026-10-01, branch develop. No tag, push, production
-release, published image or remote GitHub workflow execution is claimed.
+Release snapshot `v0.2.0`, prepared on branch develop, 2026-10-01. Binary archives
+are published by the tag-triggered workflow; Docker images are not published.
+
+## Guided setup (`v0.2.0`)
+
+`dbvault init` creates runtime-schema YAML with inline prompts or complete flags.
+It supports all four database engines and storage backends, environment password
+references, compression, a redacted review, optional reuse of database/native-tool
+testing, and protected atomic config publication. Default path: `dbvault.yaml` in
+the working directory. Non-TTY/JSON/quiet/non-interactive callers never prompt.
+
+Verified in this work: fake-prompter coverage for all engine/backend combinations;
+real SQLite init/load/test acceptance; concurrent no-overwrite config creation;
+secret redaction, cancellation and missing-tool guards; Windows terminal arrows,
+numbered fallback, masked password input and cancellation exit code 5. Full unit,
+vet and race suites passed, as did the existing PostgreSQL/MySQL/MongoDB/cloud
+integration suite. Windows amd64, Linux amd64 and macOS arm64 binaries built.
+macOS runtime was not executed. An additional Linux binary/container smoke test
+could not be verified because Docker stopped responding after the integration run.
+
+## Official update check (`v0.2.0`)
+
+`dbvault update check` compares the shared build version with GitHub's official
+latest stable release. It validates the SemVer tag and exact release URL, caches
+only public release metadata for 24 hours, and displays a pinned Go install
+command plus the official release page for prebuilt binaries. Development builds
+skip the network. The command never downloads or replaces a binary.
+
+Verified with local HTTP fixtures for version ordering, stable-only filtering,
+malformed/rate-limited responses, timeout/cancellation and cache behavior; CLI
+JSON, human failure output and help; and a live read-only check returning the
+published `v0.1.0` release.
+
+## Readiness diagnostics (`dbvault doctor`, `v0.2.0`)
+
+The command reports configuration, authenticated database/native-tool preflight,
+storage access, temporary-directory readiness and Slack configuration. Cloud
+storage is checked with a narrow list request only; cloud writes/deletes and Slack
+delivery are deliberately not exercised. Local storage probes use a temporary
+file that is removed. The report is available as human text or JSON; failed checks
+return exit code 1 while warnings remain advisory.
 
 ## Implemented scope
 
@@ -54,7 +93,7 @@ encryption and a metrics exporter are future, separately scoped work.
 
 ## Executed checks
 
-- PASS: subsequent CLI help audit of all 18 public nodes, both help routes,
+- PASS: subsequent CLI help audit of all 22 public nodes, both help routes,
   examples/defaults/required inputs, typo suggestions and secret-safe flag errors.
   Final full unit/vet checks and CLI/config race tests passed; Windows and Linux
   binary help acceptance passed. See [CLI help audit](cli-help-audit.md).

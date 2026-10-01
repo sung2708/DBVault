@@ -50,14 +50,18 @@ make test
 
 `make build` writes `bin/dbvault` (`bin/dbvault.exe` on Windows). Custom builds
 use `go build -o bin/dbvault ./cmd/dbvault`; `go install ./cmd/dbvault` installs
-the same entrypoint into Go's binary directory. No release-specific implementation
-exists. Public installation uses `github.com/sung2708/DBVault/cmd/dbvault@latest`,
+the same entrypoint into Go's binary directory. Tag-triggered release packaging
+is defined in `.github/workflows/release.yml`. Public installation uses `github.com/sung2708/DBVault/cmd/dbvault@latest`,
 because the module root is not a `main` package.
 
 Extension points are `internal/database`, `internal/storage`, `internal/compression`,
 `internal/pipeline`, `internal/cli`, `internal/presentation`, `internal/notify`,
 `internal/schedule` and `internal/config`. Core events contain actual pipeline
 measurements; terminal formatting belongs in presentation. Keep these APIs internal.
+Guided setup lives in `internal/onboarding`, with a testable Prompter interface;
+Charm Huh components belong only to `internal/presentation`. The init command
+collects flags and injects the same adapter factory/application test service used
+by normal commands. YAML generation/atomic publication live in `internal/config`.
 Installed binaries need no repository resources: help/version are self-contained;
 operations load the user's `dbvault.yaml` in the current directory or `--config`.
 
@@ -75,6 +79,9 @@ go run ./cmd/dbvault backup --config dbvault.yaml
 ## 2. Code Quality & Formatting
 
 All code must pass strict Go formatting and vetting standards before submission:
+
+Go source and module files use LF on every platform, enforced by `.gitattributes`,
+so Windows checkouts also match gofmt's canonical output.
 
 ```bash
 # Format source files

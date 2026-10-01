@@ -5,7 +5,7 @@
     <img alt="DBVault" src="assets/logo.svg" width="560">
   </picture>
 
-  <p><strong>Database backup &amp; restore CLI</strong><br><sub>Built with Go for reliable, streaming infrastructure workflows.</sub></p>
+  <p><strong>Database backup &amp; restore CLI</strong></p>
 </div>
 
 [![Go Version](https://img.shields.io/badge/go-1.26%2B-blue.svg)](https://golang.org)
@@ -18,7 +18,7 @@
 
 > [!IMPORTANT]
 > **Audit Note (Current Implementation State):**
-> The repository contains working **PostgreSQL, MySQL, MongoDB and SQLite adapters with local/S3/GCS/Azure storage** (`github.com/sung2708/DBVault`). No binary release has been tagged. See [verified status](docs/implementation-status.md) and [ADRs](docs/adr/README.md) for the implementation contract and test evidence.
+> The repository contains working **PostgreSQL, MySQL, MongoDB and SQLite adapters with local/S3/GCS/Azure storage** (`github.com/sung2708/DBVault`). Release `v0.2.0` adds guided setup, readiness diagnostics and update checks. See [verified status](docs/implementation-status.md) and [ADRs](docs/adr/README.md) for the implementation contract and test evidence.
 >
 > Throughout this documentation:
 > - **Implemented**: Four adapters, four storage providers, none/gzip/zstd, SHA-256, metadata, verification, retention, destructive-operation guards, Slack and persistent cron schedules.
@@ -69,6 +69,9 @@ Key architectural tenets:
 | Feature | Status | Description |
 |---|---|---|
 | **Unified CLI Interface** | Implemented | Grouped help, command workflows/examples, actionable input errors and schedule subcommands |
+| **Guided configuration setup** | Implemented | `dbvault init` creates validated configuration interactively or with automation flags |
+| **Readiness diagnostics** | Implemented | `dbvault doctor` checks configuration, authenticated database/tool compatibility, storage access and temporary directory without creating backups or sending Slack messages |
+| **Update checks** | Implemented | `dbvault update check` compares the installed build with official stable releases and provides install instructions |
 | **PostgreSQL Adapter** | Implemented | Custom archive streaming via pg_dump; restore via pg_restore |
 | **MySQL Adapter** | Implemented | Oracle MySQL 8.x/InnoDB logical dumps; full SQL restore |
 | **MongoDB Adapter** | Implemented | Native archives; database dumps require quiesced writes |
@@ -192,17 +195,16 @@ dbvault version
 ```
 
 Use `@vX.Y.Z` instead of `@latest` to pin an actual published tag.
-This installs DBVault only;
-native PostgreSQL/MySQL/MongoDB tools are separate prerequisites. The current
-working-tree changes become available through this command after maintainers
-publish them; no release is created by this work.
+This installs DBVault only; native PostgreSQL/MySQL/MongoDB tools are separate
+prerequisites. Use `dbvault update check` for a pinned Go install command when a
+newer stable version is available.
 
 ### Prebuilt Binaries
 
 Maintainer-triggered releases package Linux amd64/arm64, macOS amd64/arm64 and
 Windows amd64 archives with `checksums.txt`. See the
 [release assets](https://github.com/sung2708/DBVault/releases) for published
-versions. This work prepares that pipeline and does not publish assets.
+versions. Release `v0.2.0` is built and published by the tag-triggered workflow.
 
 ### Building from Source
 
@@ -241,8 +243,8 @@ Alternatively, install the current checkout into Go's configured binary director
 go install ./cmd/dbvault
 ```
 
-Add that directory to `PATH`. There is no tagged binary release from this work;
-see [installation](docs/installation.md) for OS-specific dependency setup.
+Add that directory to `PATH`. See [installation](docs/installation.md) for
+published binaries and OS-specific dependency setup.
 
 ---
 
@@ -261,7 +263,8 @@ dbvault help verify
 
 | Goal | Command |
 |---|---|
-| Validate YAML, then check database connectivity | `config`, `test` |
+| Validate YAML, then check system readiness and database connectivity | `config`, `doctor`, `test` |
+| Create YAML with guided setup or automation flags | `init` |
 | Create a full backup | `backup` |
 | Find backup names and read metadata | `list`, `inspect` |
 | Check stored size and SHA-256 | `verify` |
@@ -269,6 +272,7 @@ dbvault help verify
 | Delete one backup or apply retention | `delete`, `cleanup` |
 | Save schedules and run their foreground daemon | `schedule` |
 | Show version/build information | `version` |
+| Check for a newer official stable release | `update check` |
 
 Commands accept flags; archive operations use `--target`, not a positional backup
 ID. Use the **name** returned by `list`, not the manifest ID. `--output json`
@@ -282,6 +286,33 @@ from YAML, with documented environment and CLI overrides.
 ---
 
 ## Quick Start
+
+### Guided Setup
+
+Create a configuration with an inline keyboard wizard:
+
+```bash
+dbvault init
+dbvault doctor
+dbvault test
+dbvault backup --dry-run
+dbvault backup
+```
+
+Setup supports PostgreSQL, MySQL, MongoDB and SQLite with local/S3/GCS/Azure
+storage. It saves `dbvault.yaml` in the current directory, or the path chosen
+with `--config`, and keeps passwords as environment-variable references.
+Set the named password variable before running database commands. Existing
+files are protected; overwrite requires approval or `--force`.
+
+For scripts, supply the required flags; no terminal interaction is needed:
+
+```bash
+dbvault init --non-interactive --database postgres --database-name production --user dbvault --storage local
+```
+
+Run `dbvault init --help` for cloud settings, TLS and optional connection testing.
+The manual YAML workflow below remains supported.
 
 ### 1. Initialize Configuration
 
@@ -516,7 +547,8 @@ go vet ./...
 go test -v -timeout=20m -tags=integration ./test/integration/...
 ```
 
-The CLI help audit exercised all 18 public nodes on Windows and Linux. Database
+Recursive CLI tests cover all 22 public help nodes. Earlier Windows and Linux
+binary smoke checks covered the 18-node pre-init command tree. Database
 and cloud-emulator restore drills passed; live IAM/KMS, actual Slack delivery and
 macOS execution remain unverified. Current evidence is in
 [implementation status](docs/implementation-status.md) and [CLI help audit](docs/cli-help-audit.md).
@@ -556,7 +588,7 @@ Explore the complete technical documentation:
 
 - **Implemented:** Four engines/providers, compression, integrity, retention, Slack and persistent cron schedules, with database and emulator restore drills.
 - **Future work:** Engine-specific physical recovery chains, client-side encryption and metrics; live-cloud deployment validation.
-- **Prepared tooling:** Docker packaging, CI and release workflows; remote workflow execution remains unverified.
+- **Release tooling:** Docker packaging, CI and release workflows build cross-platform binaries and checksums.
 - **Release work:** Publish reviewed tags/images after live operational validation.
 
 See [docs/roadmap.md](docs/roadmap.md) for implementation milestones and remaining work.

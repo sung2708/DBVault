@@ -96,6 +96,19 @@ type Overrides struct {
 func Defaults() Config {
 	return Config{Storage: Storage{Type: "local", Local: Local{Permissions: "0700"}}, Database: Database{Host: "127.0.0.1", SSLMode: "prefer"}, Compression: Compression{"gzip", 6}}
 }
+
+// DefaultPort is shared by configuration loading and guided setup.
+func DefaultPort(engine string) int {
+	switch engine {
+	case "postgres":
+		return 5432
+	case "mysql":
+		return 3306
+	case "mongodb":
+		return 27017
+	}
+	return 0
+}
 func Load(path string, o Overrides) (Config, error) {
 	c := Defaults()
 	f, err := os.Open(path)
@@ -137,14 +150,7 @@ func Load(path string, o Overrides) (Config, error) {
 		}
 	}
 	if c.Database.Port == 0 {
-		switch c.Database.Type {
-		case "postgres":
-			c.Database.Port = 5432
-		case "mysql":
-			c.Database.Port = 3306
-		case "mongodb":
-			c.Database.Port = 27017
-		}
+		c.Database.Port = DefaultPort(c.Database.Type)
 	}
 	if o.Database != nil {
 		c.Database.Database = *o.Database
@@ -185,7 +191,7 @@ func (c Config) Validate() error {
 		if c.Database.PasswordEnv == "" {
 			return invalid("database.password_env", "required")
 		}
-		if c.Database.Host == "" || strings.ContainsAny(c.Database.Host, "=\x00\r\n") {
+		if c.Database.Host == "" || strings.ContainsAny(c.Database.Host, "=\x00\r\n") || strings.Contains(c.Database.Host, "://") {
 			return invalid("database.host", "must be a hostname or IP, not a connection string")
 		}
 		if c.Database.Port < 1 || c.Database.Port > 65535 {

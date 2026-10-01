@@ -8,8 +8,11 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sung2708/DBVault/internal/database"
+	"github.com/sung2708/DBVault/internal/doctor"
 	"github.com/sung2708/DBVault/internal/metadata"
+	"github.com/sung2708/DBVault/internal/onboarding"
 	"github.com/sung2708/DBVault/internal/schedule"
+	"github.com/sung2708/DBVault/internal/update"
 )
 
 func (r *Renderer) Result(operation string, value any) error {
@@ -20,6 +23,54 @@ func (r *Renderer) Result(operation string, value any) error {
 	}
 	var b strings.Builder
 	switch v := value.(type) {
+	case doctor.Report:
+		title, state := "System readiness checks", "success"
+		if !v.Ready {
+			title, state = "Readiness checks need attention", "error"
+		} else if v.Summary.Warnings > 0 {
+			state = "warning"
+		}
+		r.title(&b, state, title)
+		for _, check := range v.Checks {
+			style := string(check.Status)
+			if style == "pass" {
+				style = "success"
+			}
+			if style == "skipped" {
+				style = "header"
+			}
+			fmt.Fprintf(&b, "  %s %s\n", r.status(style, string(check.Status), false), r.safe(check.Name+" — "+check.Summary))
+			if check.Detail != "" {
+				r.field(&b, "Detail", check.Detail)
+			}
+			if check.Remediation != "" {
+				r.hint(&b, check.Remediation)
+			}
+		}
+		fmt.Fprintf(&b, "\n%d passed, %d warnings, %d failed, %d skipped\n", v.Summary.Passed, v.Summary.Warnings, v.Summary.Failed, v.Summary.Skipped)
+		if v.Ready {
+			r.hint(&b, "Ready for a backup preflight: dbvault backup --dry-run")
+		}
+	case update.Result:
+		r.updateResult(&b, v)
+	case onboarding.Result:
+		r.title(&b, "success", "Configuration created")
+		r.field(&b, "Config", v.Path)
+		r.field(&b, "Engine", Engine(v.Database))
+		r.field(&b, "Database", v.DatabaseName)
+		r.field(&b, "Storage", v.Storage)
+		r.field(&b, "Location", v.StorageLocation)
+		r.field(&b, "Compression", v.Compression)
+		status := "Not tested"
+		if v.Tested {
+			status = "Database connection and native tools verified"
+		}
+		r.field(&b, "Connection", status)
+		if v.PasswordEnv != "" {
+			r.hint(&b, "Before database operations, set environment variable: "+r.safe(v.PasswordEnv))
+		}
+		path := quoteSetupPath(r.safe(v.Path))
+		r.hint(&b, fmt.Sprintf("Next:\n  dbvault config --config %s\n  dbvault test --config %s\n  dbvault doctor --config %s\n  dbvault backup --config %s --dry-run\n  dbvault backup --config %s", path, path, path, path, path))
 	case metadata.Manifest:
 		if r.options.Quiet && operation == "backup" {
 			fmt.Fprintln(&b, r.safe(v.Name))
@@ -146,6 +197,44 @@ func (r *Renderer) Result(operation string, value any) error {
 	}
 	_, err := fmt.Fprint(r.out, b.String())
 	return err
+}
+
+// Quote for the documented Windows PowerShell and Unix shell workflows.
+func quoteSetupPath(path string) string {
+	if runtime.GOOS == "windows" {
+		return `"` + strings.NewReplacer("`", "``", "$", "`$", `"`, "`\"").Replace(path) + `"`
+	}
+	return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
+}
+
+func (r *Renderer) updateResult(b *strings.Builder, v update.Result) {
+	r.title(b, "header", "DBVault Update")
+	r.field(b, "Installed", v.InstalledVersion)
+	if v.LatestVersion != "" {
+		r.field(b, "Latest", v.LatestVersion)
+	}
+	switch v.State {
+	case update.Development:
+		r.title(b, "warning", "Development build detected")
+		r.hint(b, "Automatic release comparison is unavailable for this build.")
+	case update.UpdateAvailable:
+		fmt.Fprintln(b)
+		fmt.Fprintln(b, r.status("warning", "New version available", false))
+		fmt.Fprintf(b, "\n  %s → %s\n", r.outStyle.muted.Render(r.safe(v.InstalledVersion)), r.outStyle.accent.Render(r.safe(v.LatestVersion)))
+		r.hint(b, "Update with Go:\n\n  "+r.outStyle.accent.Render(r.safe(v.UpdateCommand)))
+		if v.MajorUpgrade {
+			r.hint(b, "This update changes the major version. Review the release notes and upgrade instructions before updating.")
+		}
+		r.hint(b, "Prebuilt binary:\n  "+r.outStyle.accent.Render(r.safe(v.ReleaseURL)))
+	case update.UpToDate:
+		r.title(b, "success", "You're running the latest stable release.")
+	case update.InstalledNewer:
+		r.title(b, "warning", "Installed version is newer than the latest published stable release.")
+		r.hint(b, "No downgrade is suggested. See the official release page: "+r.safe(v.ReleaseURL))
+	case update.VersionUnknown:
+		r.title(b, "warning", "Installed version is not a valid SemVer release.")
+		r.hint(b, "No update comparison or downgrade command is available. See the official release page: "+r.safe(v.ReleaseURL))
+	}
 }
 
 func (r *Renderer) backupFields(b *strings.Builder, m metadata.Manifest, full bool) {

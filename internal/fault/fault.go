@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/sung2708/DBVault/internal/doctor"
 )
 
 type Kind string
@@ -37,6 +39,10 @@ func Wrap(k Kind, op string, err error) error {
 func ExitCode(err error) int {
 	if err == nil {
 		return 0
+	}
+	var readiness *doctor.ReadinessError
+	if errors.As(err, &readiness) {
+		return 1
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return 5

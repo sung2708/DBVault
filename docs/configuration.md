@@ -4,6 +4,23 @@ This document provides a comprehensive reference for the DBVault configuration s
 
 ## Implemented schema
 
+Use `dbvault init` to generate a small configuration using these same types and
+validation rules, or create YAML manually. `dbvault config` remains a validation
+command; it does not create a file. The default path for both commands is
+`dbvault.yaml` in the working directory; `--config` selects another path.
+
+Setup uses explicit flags, then interactive answers (when available), then runtime
+defaults. It does not copy runtime environment overrides into the generated YAML;
+those overrides still apply when loading the file for operations. The default
+password reference is `DBVAULT_DB_PASSWORD`. No plaintext secret is generated.
+The default compression remains gzip level 6. Only full backup is offered.
+
+Config creation writes a private `0600` temporary file, flushes/closes it, and
+publishes a complete file with a no-overwrite hard link. Explicit `--force` or
+interactive overwrite uses replacement by rename. Hard-link-capable filesystems
+are required for creation. Parent directories must exist; symlink/directory
+destinations are rejected. Existing Windows directory ACLs remain operator-managed.
+
 The binary implements PostgreSQL, MySQL, MongoDB and SQLite; local, S3, GCS and
 Azure storage; none/gzip/zstd, retention and optional Slack. YAML decoding rejects
 unknown fields, multiple documents and invalid types. Missing passwords are

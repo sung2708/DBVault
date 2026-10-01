@@ -15,11 +15,6 @@ import (
 	"github.com/sung2708/DBVault/internal/app"
 	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/database"
-	"github.com/sung2708/DBVault/internal/database/mongodb"
-	"github.com/sung2708/DBVault/internal/database/mysql"
-	"github.com/sung2708/DBVault/internal/database/postgres"
-	"github.com/sung2708/DBVault/internal/database/sqlite"
-	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/notify"
 	"github.com/sung2708/DBVault/internal/presentation"
@@ -27,6 +22,7 @@ import (
 	"github.com/sung2708/DBVault/internal/security"
 	"github.com/sung2708/DBVault/internal/storage"
 	"github.com/sung2708/DBVault/internal/storage/providers"
+	"github.com/sung2708/DBVault/internal/update"
 )
 
 type Build struct{ Version, Commit, Date string }
@@ -37,11 +33,19 @@ type options struct {
 	quiet, noColor bool
 	build          Build
 	redactor       *security.Redactor
+	updates        update.Service
 }
 
 func New(b Build, out, errOut io.Writer) *cobra.Command {
-	o := &options{build: b, redactor: security.New()}
-	root := &cobra.Command{Use: "dbvault", Short: "Database backup, verification and restore", Long: "DBVault creates and restores verified database backups.\nSupports PostgreSQL, MySQL, MongoDB and SQLite with local, S3, GCS or Azure storage.\n\nOperations use dbvault.yaml in the current directory; select another YAML file\nwith --config. Start with config to validate it, then test to check connectivity.", Args: noPositionalArgs, SilenceUsage: true, SilenceErrors: true, Version: b.Version, Example: "  dbvault config\n  dbvault test\n  dbvault backup --help\n  dbvault schedule --help", RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	return newWithUpdateService(b, out, errOut, nil)
+}
+
+func newWithUpdateService(b Build, out, errOut io.Writer, updates update.Service) *cobra.Command {
+	if updates == nil {
+		updates = &update.Checker{}
+	}
+	o := &options{build: b, redactor: security.New(), updates: updates}
+	root := &cobra.Command{Use: "dbvault", Short: "Database backup, verification and restore", Long: "DBVault creates and restores verified database backups.\nSupports PostgreSQL, MySQL, MongoDB and SQLite with local, S3, GCS or Azure storage.\n\nOperations use dbvault.yaml in the current directory; select another YAML file\nwith --config. Start with init to create it, doctor to check readiness, then\nbackup --dry-run before the first backup.", Args: noPositionalArgs, SilenceUsage: true, SilenceErrors: true, Version: b.Version, Example: "  dbvault init\n  dbvault doctor\n  dbvault backup --dry-run\n  dbvault backup --help\n  dbvault schedule --help", RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
 	root.SuggestionsMinimumDistance = 2
 	streamLock := &sync.Mutex{}
 	root.SetOut(&presentation.LockedWriter{Writer: out, Mutex: streamLock})
@@ -69,6 +73,9 @@ func New(b Build, out, errOut io.Writer) *cobra.Command {
 		return o.output(c, map[string]string{"version": b.Version, "commit": b.Commit, "built": b.Date, "runtime": runtime.Version()})
 	}})
 	root.AddCommand(o.scheduleCommand())
+	root.AddCommand(o.initCommand())
+	root.AddCommand(o.updateCommand())
+	root.AddCommand(o.doctorCommand())
 	root.InitDefaultHelpCmd()
 	for _, command := range root.Commands() {
 		if command.Name() == "help" {
@@ -207,17 +214,9 @@ func (o *options) run(c *cobra.Command, name string) error {
 		if err != nil {
 			return err
 		}
-		switch cfg.Database.Type {
-		case "postgres":
-			adapter = &postgres.Adapter{Config: cfg.Database, Password: password, Runner: runner.Native{Redactor: o.redactor}}
-		case "mysql":
-			adapter = &mysql.Adapter{Config: cfg.Database, Password: password, Runner: runner.Native{Redactor: o.redactor}}
-		case "mongodb":
-			adapter = &mongodb.Adapter{Config: cfg.Database, Password: password, Runner: runner.Native{Redactor: o.redactor}}
-		case "sqlite":
-			adapter = &sqlite.Adapter{Config: cfg.Database}
-		default:
-			return fault.Wrap(fault.Unsupported, "database.type", fmt.Errorf("configured engine is not implemented"))
+		adapter, err = databaseAdapter(cfg, password, o.redactor)
+		if err != nil {
+			return fault.Wrap(fault.Unsupported, "database.type", err)
 		}
 	}
 	// Preflight and backup dry-runs never initialize or mutate storage.

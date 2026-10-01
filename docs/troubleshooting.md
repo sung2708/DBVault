@@ -1,5 +1,12 @@
 # Troubleshooting Guide
 
+Run `dbvault doctor` for a secret-safe readiness report covering configuration,
+database authentication and native tools, storage access, and temporary files.
+For cloud storage it checks a narrow list request only; it does not prove write or
+delete permissions. Slack delivery is not tested. A missing local storage directory
+is reported as a warning when its existing parent is writable; DBVault creates the
+configured directory when an operation needs it.
+
 This guide provides diagnostic procedures and remedies for common operational errors encountered when running DBVault.
 
 ---

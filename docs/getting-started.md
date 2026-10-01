@@ -2,7 +2,8 @@
 
 This tutorial guides you through setting up DBVault, configuring your first database connection, creating a verified backup, and executing a safe restore test.
 
-The current binary supports PostgreSQL/MySQL with local storage. Output below is
+The current binary supports PostgreSQL, MySQL, MongoDB and SQLite with
+local/S3/GCS/Azure storage. This tutorial uses PostgreSQL and local storage. Output below is
 illustrative; actual command results are metadata records and stderr logs.
 Backups have unique names such as `demo_db_20261001_020000_<random-id>.dump.gz`.
 Use the actual `backup_name` printed by backup or `dbvault list`. PostgreSQL
@@ -67,6 +68,48 @@ dbvault --help
 ## 3. Configuration Setup
 
 DBVault relies on declarative YAML configuration files combined with environment variables for authentication secrets.
+
+### Guided
+
+```bash
+dbvault init
+```
+
+Choose the database, enter its connection details, choose storage/compression,
+review the summary and confirm creation. Use arrows and Enter; Esc or Ctrl+C
+cancels without writing a partial configuration. `TERM=dumb` uses numbered
+choices and plain input instead. SQLite asks only for the database file.
+
+The default path is `dbvault.yaml` in your current directory. Supply `--config`
+to choose another file; its parent directory must exist. Relative database and
+backup paths keep the existing runtime meaning: relative to the working directory.
+The wizard does not create a database or cloud bucket/container.
+
+Passwords are referenced by environment variable (default `DBVAULT_DB_PASSWORD`).
+An optional connection test can ask for a masked temporary password when the
+variable is unset; that password is not saved or exported. Set the variable
+before using the generated config later. Cloud credentials use native SDK chains.
+
+For MongoDB, stop application writes throughout backup and explicitly acknowledge
+`quiesced`; setup does not stop writes. Native tools are checked only when testing.
+If testing fails, interactive setup can still save the config with explicit approval.
+
+Flags skip corresponding questions. Complete required flags skip the wizard:
+
+```bash
+dbvault init --non-interactive --database postgres --database-name demo_db --user postgres --storage local --password-env DB_PASSWORD
+```
+
+Non-TTY input, JSON, `--quiet` and `--non-interactive` never prompt. Missing
+required values fail with instructions. Existing files require interactive
+overwrite approval or `--force`; no automatic merge is performed.
+
+After creation, run `dbvault doctor` to check the authenticated database
+connection, required client tools and storage access. Cloud checks verify list/read
+access only; doctor never writes or deletes cloud objects and never sends a Slack
+message. Use `dbvault doctor --json` for automation.
+
+### Manual
 
 Create a working directory and an initial configuration file:
 

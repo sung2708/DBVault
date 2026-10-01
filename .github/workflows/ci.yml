@@ -30,6 +30,10 @@ jobs:
           cd "$RUNNER_TEMP"
           "$GOBIN/dbvault" --help
           "$GOBIN/dbvault" version --output json
+          "$GOBIN/dbvault" update check --output json
+          "$GOBIN/dbvault" init --non-interactive --database sqlite --database-name ./init.db --storage local --config ./init.yaml --output json
+          "$GOBIN/dbvault" config --config ./init.yaml
+          "$GOBIN/dbvault" doctor --help
       - name: Database and cloud emulator backup-destroy-restore drills
         run: go test -v -timeout=20m -tags=integration ./test/integration/...
   build:

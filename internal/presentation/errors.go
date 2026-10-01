@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sung2708/DBVault/internal/fault"
+	"github.com/sung2708/DBVault/internal/update"
 )
 
 func (r *Renderer) Error(operation, usage, help string, err error) {
@@ -20,7 +21,26 @@ func (r *Renderer) ErrorTo(w io.Writer, operation, usage, help string, err error
 	defer r.mu.Unlock()
 	r.clearLocked()
 	if r.options.JSON {
-		json.NewEncoder(w).Encode(map[string]any{"level": "error", "operation": r.safe(operation), "error": r.redactor.Text(err.Error()), "exit_code": fault.ExitCode(err), "help": help})
+		record := map[string]any{"level": "error", "operation": r.safe(operation), "error": r.redactor.Text(err.Error()), "exit_code": fault.ExitCode(err), "help": help}
+		var checkFailure *update.CheckError
+		if errors.As(err, &checkFailure) {
+			record["state"] = checkFailure.Result.State
+			record["installed_version"] = checkFailure.Result.InstalledVersion
+		}
+		json.NewEncoder(w).Encode(record)
+		return
+	}
+	var checkFailure *update.CheckError
+	if errors.As(err, &checkFailure) {
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(w, r.status("warning", "Update check canceled", true))
+			return
+		}
+		fmt.Fprintln(w, r.status("error", "Could not check for updates", true))
+		if checkFailure.Result.InstalledVersion != "" {
+			fmt.Fprintf(w, "  Installed    %s\n", r.safe(checkFailure.Result.InstalledVersion))
+		}
+		fmt.Fprintf(w, "  Reason       %s\n\nTry again later.\n", Sanitize(r.redactor.Text(checkFailure.Result.Reason)))
 		return
 	}
 	title := operation + " failed"
