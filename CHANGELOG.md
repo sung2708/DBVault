@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-10-02
+
 ### Added
 - PostgreSQL recovery drills restore verified backups into newly created Docker
   servers with fresh credentials, no external network or host binds, read-only

@@ -1,9 +1,11 @@
 # Verified implementation status
 
-Release snapshot `v0.3.0`, 2026-10-02. Binary archives
-are published by the tag-triggered workflow; Docker images are not published.
+Release snapshot `v0.4.0`, 2026-10-02. The tag-triggered workflow publishes binary
+archives and versioned GHCR images after validation. Registry publication and
+ARM64 runtime execution remain unverified locally; check the release workflow
+and package access before using published artifacts.
 
-## Checkout additions (Unreleased)
+## PostgreSQL recovery and container distribution (`v0.4.0`)
 
 PostgreSQL recovery drills use a newly created Docker-isolated server with fresh
 credentials and a preloaded official image matching the source major. They reuse
@@ -17,9 +19,9 @@ objects and skipped during table scans. See ADR-0011.
 
 The release workflow now prepares versioned GHCR images for all four engine
 targets on Linux amd64/arm64, with SBOM/provenance and per-architecture CI smoke
-checks. Publication awaits the next intentional release; no registry publication
-has been performed as part of these checkout edits. The sections below describe
-the `v0.3.0` release snapshot, rather than these new capabilities.
+checks. The `v0.4.0` tag triggers the first official container publication;
+artifacts become available only after the workflow succeeds. The sections below
+retain the implementation and verification history of earlier releases.
 
 Verified locally on Windows with Docker: unit/race suites, `go vet`, module
 verification, workflow validation with actionlint and documentation file links

@@ -1,6 +1,6 @@
 # ADR-0011: PostgreSQL recovery in an owned network-isolated Docker server
 
-Status: Accepted — 2026-10-02 (Unreleased)
+Status: Accepted — 2026-10-02 (`v0.4.0`)
 
 ## Decision
 

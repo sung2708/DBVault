@@ -50,8 +50,8 @@ go install github.com/sung2708/DBVault/cmd/dbvault@latest
 ```
 
 Add Go's binary directory to your user `PATH`; see the
-[installation guide](installation.md#install-with-go). To use Unreleased checkout
-features, build from source instead of installing `@latest`. Verify the binary runs:
+[installation guide](installation.md#install-with-go). PostgreSQL recovery drills
+require `v0.4.0` or later; `@latest` resolves to a published tag. Verify the binary runs:
 ```bash
 dbvault --help
 ```

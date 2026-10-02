@@ -16,7 +16,7 @@ validation remain separate future milestones.
 
 - [x] SQLite recovery-drill CLI (`v0.3.0`) with isolated restore, structural validation,
   owned cleanup and immutable exact-backup health evidence.
-- [x] PostgreSQL recovery drills in new Docker-isolated servers (Unreleased).
+- [x] PostgreSQL recovery drills in new Docker-isolated servers (`v0.4.0`).
 - [ ] MySQL/MongoDB recovery drills with proven server/credential isolation
   and corresponding real integration evidence.
 
@@ -60,10 +60,10 @@ Phase 1 delivered an end-to-end backup and restore workflow for PostgreSQL to lo
 - [x] **Zstandard:** streaming github.com/klauspost/compress/zstd.
 - [x] **Slack Notifications:** HTTPS completion/failure messages; delivery outages do not alter backup results.
 - [x] **Local Container Packaging:** Four non-root runtime targets for PostgreSQL, MySQL, MongoDB and SQLite; builds and version/native-client checks executed locally.
-- [x] **Container release workflow (Unreleased):** Versioned GHCR images for four
+- [x] **Container release workflow (`v0.4.0`):** Versioned GHCR images for four
   runtime targets, Linux amd64/arm64, published after intentional release tags.
 - [ ] **First official container publication:** Execute the prepared workflow on
-  the next maintainer-approved release and verify registry access.
+  the `v0.4.0` release workflow and verify registry access.
 - [x] **In-Process Scheduler:** Five-field cron, persistent CRUD, timezones, overlap prevention and cancellation.
 
 ---

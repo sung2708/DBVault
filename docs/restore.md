@@ -19,7 +19,7 @@ evidence with the exact backup without altering immutable manifests. Missing
 production files do not prevent embedded-engine preflight, provided source parent
 is resolvable. No production safety bypass or shell validation hooks exist.
 
-The checkout adds **PostgreSQL drills (Unreleased)** in a newly created Docker
+Release `v0.4.0` adds **PostgreSQL drills** in a newly created Docker
 server using fresh credentials, no external network, ports or host binds. It
 reuses the verified snapshot and performs read-only catalog/table readability
 checks. Preload the trusted official image matching the source major; see

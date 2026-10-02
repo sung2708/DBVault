@@ -163,8 +163,8 @@ Database Tools. Every runtime uses a non-root user. Mount a config, private
 backup directory and any SQLite database with permissions for that user.
 Set credentials by environment variable name/secret injection. The new release
 workflow publishes Linux amd64/arm64 images to GHCR after binary release success.
-The first publication requires the next intentional release tag; no new images
-are published merely by modifying this checkout. For builds, `VERSION`, `COMMIT` and `BUILD_DATE` are optional
+The first container release is `v0.4.0`; images become available only after its
+release workflow succeeds. For builds, `VERSION`, `COMMIT` and `BUILD_DATE` are optional
 build arguments; their defaults identify development builds.
 
 To package an already cross-compiled Linux binary, Buildx can override the build
@@ -173,7 +173,7 @@ stage with a named context:
 The context directory must contain the executable named `dbvault` for the image's
 architecture. This route was used to smoke-test all four final runtime targets.
 
-#### Versioned registry images (next release)
+#### Versioned registry images (`v0.4.0` and later)
 
 Tags include the DBVault version and bundled engine/client version:
 
@@ -207,7 +207,7 @@ For scheduling, use the [CronJob example](scheduling.md#4-kubernetes-cronjob).
 
 #### PostgreSQL recovery drills
 
-The checkout supports drills on the CLI host using a trusted Docker daemon and
+Release `v0.4.0` supports drills on the CLI host using a trusted Docker daemon and
 a preloaded official `postgres:<source-major>-bookworm` image. No host database
 tools or production credentials are used by the drill. Run it on the host;
 the published backup images do not include Docker or a mounted Docker socket.

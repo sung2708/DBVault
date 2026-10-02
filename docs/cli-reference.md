@@ -173,12 +173,12 @@ dbvault recovery drill --target BACKUP-NAME --recovery-database NEW-SQLITE-PATH 
 dbvault recovery drill --target BACKUP-NAME --recovery-database NEW-SQLITE-PATH --confirm [--cleanup] [--timeout 2h] [--output json]
 ```
 
-SQLite support shipped in `v0.3.0`. The checkout also supports **PostgreSQL in a
-new Docker-isolated server (Unreleased)**. MySQL/MongoDB return an unsupported
+SQLite support shipped in `v0.3.0`. Release `v0.4.0` also supports **PostgreSQL in a
+new Docker-isolated server**. MySQL/MongoDB return an unsupported
 error before contacting the database or creating a recovery target. No force
 bypass, existing-server target or arbitrary validation hook is provided.
 
-### PostgreSQL (Unreleased)
+### PostgreSQL (`v0.4.0`)
 
 ```bash
 docker pull postgres:16-bookworm # use the source major from the backup
