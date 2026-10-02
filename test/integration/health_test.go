@@ -57,7 +57,7 @@ func assertBackupHealth(t *testing.T, ctx context.Context, s *app.Service, m met
 		t.Fatalf("missing backup: %+v %v", r, err)
 	}
 	s.Config = previousConfig
-	if s.Config.Database.Type != "sqlite" {
+	if s.Config.Database.Type == "mysql" || s.Config.Database.Type == "mongodb" {
 		r, err := s.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: filepath.Join(t.TempDir(), "isolated.sqlite"), Confirm: true})
 		var typed *fault.Error
 		if !errors.As(err, &typed) || typed.Kind != fault.Unsupported || r.TargetState != "not_created" || r.RecordKey != "" {

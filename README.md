@@ -16,6 +16,29 @@
 
 ## Current Project Status
 
+### Start here
+
+Download the executable for your platform from [GitHub Releases](https://github.com/sung2708/DBVault/releases)
+and put it on `PATH`, or use `go install github.com/sung2708/DBVault/cmd/dbvault@latest`.
+Go is required only for source installation. Install native tools for your database,
+then run:
+
+```text
+dbvault init
+dbvault doctor
+dbvault backup
+dbvault health
+```
+
+Follow the password environment-variable instructions printed by `init` before
+running `doctor`. Configure `health.max_backup_age` and enable
+`protection.verify_after_backup` for recorded integrity checks. For recovery testing,
+see [recovery drills](docs/cli-reference.md#dbvault-recovery-drill).
+
+Checkout changes under [Unreleased](CHANGELOG.md#unreleased) add Docker-isolated
+PostgreSQL recovery drills and a GHCR release workflow. These require the next
+release; `go install @latest` installs the latest published tag.
+
 > [!IMPORTANT]
 > **Audit Note (Current Implementation State):**
 > The repository contains working **PostgreSQL, MySQL, MongoDB and SQLite adapters with local/S3/GCS/Azure storage** (`github.com/sung2708/DBVault`). Release `v0.3.0` adds backup health, status, optional post-backup verification, SQLite recovery drills and native database tool discovery. See [verified status](docs/implementation-status.md) and [ADRs](docs/adr/README.md) for the implementation contract and test evidence.
@@ -72,7 +95,7 @@ Key architectural tenets:
 | **Guided configuration setup** | Implemented | `dbvault init` creates validated configuration interactively or with automation flags |
 | **Readiness diagnostics** | Implemented | `dbvault doctor` checks configuration, authenticated database/tool compatibility, storage access and temporary directory without creating backups or sending Slack messages |
 | **Protection overview** | Implemented | `dbvault status` summarizes existing backup health, metadata, recovery evidence, storage and saved schedules without hashing archives or running a drill |
-| **Recovery drill** | SQLite | `recovery drill` restores into a new isolated file and validates its structure; server engines fail closed |
+| **Recovery drill** | SQLite; PostgreSQL in checkout | New SQLite file or new Docker-isolated PostgreSQL server, validation and separate evidence; MySQL/MongoDB fail closed |
 | **Update checks** | Implemented | `dbvault update check` compares the installed build with official stable releases and provides install instructions |
 | **PostgreSQL Adapter** | Implemented | Custom archive streaming via pg_dump; restore via pg_restore |
 | **MySQL Adapter** | Implemented | Oracle MySQL 8.x/InnoDB logical dumps; full SQL restore |
@@ -103,7 +126,7 @@ The following capability matrix reflects the verified implementation status acro
 | **Connection Test** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
 | **Full Backup** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
 | **Full Restore** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
-| **Safe Recovery Drill CLI** | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED | SUPPORTED |
+| **Safe Recovery Drill CLI** | SUPPORTED (Unreleased; Docker) | UNSUPPORTED | UNSUPPORTED | SUPPORTED |
 | **Selective Backup** | SUPPORTED | SUPPORTED | PARTIAL | UNSUPPORTED |
 | **Selective Restore** | SUPPORTED | UNSUPPORTED | SUPPORTED | UNSUPPORTED |
 | **Streaming Pipeline** | SUPPORTED | SUPPORTED | SUPPORTED | PARTIAL |
@@ -414,7 +437,14 @@ target; it is not a passed drill. Actual runs reuse restore and then run SQLite
 `--cleanup` removes only this run's file after successful validation. Failures
 preserve it for inspection. Separate `.recovery.json` records preserve evidence
 without changing backup manifests; health associates it by backup ID/name/hash.
-PostgreSQL, MySQL and MongoDB recovery drills are unsupported in V1 and fail
+The checkout also supports PostgreSQL drills in new Docker-isolated servers:
+
+```bash
+docker pull postgres:16-bookworm # match the backup's source major
+dbvault recovery drill --target ACTUAL-BACKUP-NAME --recovery-database recovery_check --confirm --cleanup
+```
+
+PostgreSQL support is Unreleased. MySQL/MongoDB drills remain unsupported and fail
 before database writes. See [recovery drill](docs/cli-reference.md#dbvault-recovery-drill).
 
 DBVault separates configuration structure from secret storage. **Never place cleartext passwords in configuration files.**

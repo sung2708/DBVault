@@ -20,6 +20,7 @@ import (
 	"github.com/sung2708/DBVault/internal/database/sqlite"
 	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/metadata"
+	"github.com/sung2708/DBVault/internal/recoverypostgres"
 	"github.com/sung2708/DBVault/internal/storage"
 	"github.com/sung2708/DBVault/internal/storage/local"
 )
@@ -54,9 +55,11 @@ type DrillResult struct {
 	RecordKey       string                       `json:"record_key,omitempty"`
 }
 
-// RecoveryDrill deliberately supports only the adapter whose isolation can be
-// enforced locally. Native server restores require a separate security design.
+// RecoveryDrill uses exclusively created files or a confined Docker server.
 func (s *Service) RecoveryDrill(ctx context.Context, o DrillOptions) (DrillResult, error) {
+	if s.Config.Database.Type == "postgres" {
+		return s.postgresRecoveryDrill(ctx, o, nil)
+	}
 	cfg := s.Config.Database
 	cfg.Database = o.RecoveryDatabase
 	return s.recoveryDrill(ctx, o, &sqlite.Adapter{Config: cfg})
@@ -425,7 +428,7 @@ func DecodeDrill(reader io.Reader) (DrillResult, error) {
 	if err := d.Decode(&extra); err != io.EOF {
 		return r, fmt.Errorf("trailing or oversized recovery record")
 	}
-	if r.Version != 1 || r.DryRun || r.BackupID == "" || r.BackupName == "" || r.SourceDatabase == "" || r.Engine != "sqlite" || r.StartedAt.IsZero() || r.CompletedAt.Before(r.StartedAt) || r.DurationSeconds < 0 {
+	if r.Version != 1 || r.DryRun || r.BackupID == "" || r.BackupName == "" || r.SourceDatabase == "" || (r.Engine != "sqlite" && r.Engine != "postgres") || r.StartedAt.IsZero() || r.CompletedAt.Before(r.StartedAt) || r.DurationSeconds < 0 {
 		return r, fmt.Errorf("invalid recovery evidence")
 	}
 	hash, err := hex.DecodeString(r.Checksum)
@@ -456,7 +459,11 @@ func DecodeDrill(reader io.Reader) (DrillResult, error) {
 		if !cleanupOK {
 			return r, fmt.Errorf("invalid passed cleanup evidence")
 		}
-		if r.Validation == nil || r.Validation.Method != "SQLite PRAGMA integrity_check and sqlite_schema query" || r.Validation.Objects < 0 {
+		method := "SQLite PRAGMA integrity_check and sqlite_schema query"
+		if r.Engine == "postgres" {
+			method = recoverypostgres.ValidationMethod
+		}
+		if r.Validation == nil || r.Validation.Method != method || r.Validation.Objects < 0 {
 			return r, fmt.Errorf("missing recovery validation evidence")
 		}
 		for _, name := range []string{"isolation", "metadata", "integrity", "compatibility", "restore", "validation", "record"} {

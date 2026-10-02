@@ -1,7 +1,35 @@
 # Verified implementation status
 
-Release snapshot `v0.3.0`, prepared on branch develop, 2026-10-02. Binary archives
+Release snapshot `v0.3.0`, 2026-10-02. Binary archives
 are published by the tag-triggered workflow; Docker images are not published.
+
+## Checkout additions (Unreleased)
+
+PostgreSQL recovery drills use a newly created Docker-isolated server with fresh
+credentials and a preloaded official image matching the source major. They reuse
+the private verified snapshot and restore pipeline, validate catalog/table
+readability, and persist separate exact-backup evidence consumed by Health/Status.
+Dry-run starts no server and checks image availability only. Explicit cleanup
+removes the owned container and anonymous volumes after success; failures preserve
+the target, stopped to prevent background restore after cancellation. MySQL/MongoDB
+drills remain unsupported. Unpopulated materialized views are counted as catalog
+objects and skipped during table scans. See ADR-0011.
+
+The release workflow now prepares versioned GHCR images for all four engine
+targets on Linux amd64/arm64, with SBOM/provenance and per-architecture CI smoke
+checks. Publication awaits the next intentional release; no registry publication
+has been performed as part of these checkout edits. The sections below describe
+the `v0.3.0` release snapshot, rather than these new capabilities.
+
+Verified locally on Windows with Docker: unit/race suites, `go vet`, module
+verification, workflow validation with actionlint and documentation file links
+passed. The full native/cloud integration suite passed; the final PostgreSQL
+fixture also passed all codecs through CLI JSON/cleanup with an unreachable
+configured source host, unpopulated materialized view, exact restored fixture
+comparison and unchanged source data. Four Linux amd64 runtime images were
+packaged from the cross-compiled binary using the named build context and
+smoke-tested for CLI, non-root users and bundled tools. ARM64 runtime execution
+is configured in CI but was not run locally; GHCR publishing was not exercised.
 
 ## Guided setup (`v0.2.0`)
 

@@ -10,7 +10,7 @@ stay unchanged, and exercise new-file isolation, hardlinks/symlinks (host privil
 permitting), Windows path normalization, dry-run, owned cleanup and exact-backup
 health association. Failure injection covers corrupted/missing archives, restore
 and validation failure, cancellation, unavailable temporary space, record-write
-failure and replacement-file cleanup refusal. Native engines must fail closed.
+failure and replacement-file cleanup refusal. MySQL/MongoDB drills fail closed.
 CLI coverage includes JSON purity, non-TTY, quiet/no-color, source-file loss and
 required confirmation/input guards.
 
@@ -23,15 +23,21 @@ go test -v -tags=integration ./test/integration -run TestSQLiteRecoveryDrill
 It restores fixtures to an isolated target and checks exact values for all three
 codecs, verifies production is untouched, rejects the production target and checks
 owned cleanup. Native database/cloud integration tests remain separate and require
-Docker; they are not evidence that the new native recovery-drill CLI is supported.
+Docker. The PostgreSQL fixture now exercises the actual operator-facing drill
+through fresh isolated containers, compares the restored dataset with the source,
+checks production is unchanged, decodes evidence, checks health association and
+verifies owned-container cleanup for all three codecs.
 
 The Docker suite also checks health against real registered PostgreSQL/MySQL/
 MongoDB backups and SQLite backups on local/S3/GCS/Azure storage for all codecs.
 Injected clocks cover fresh default/active verification, exact age limit, stale,
 missing policy and no matching backup. Cloud fixtures perform new SQLite recovery
-drills and check saved exact-backup health evidence; native fixtures assert that
-the new drill fails closed before mutation, alongside existing full/selected
-restore dataset checks.
+drills and check saved exact-backup health evidence; MySQL/MongoDB fixtures assert
+unsupported drills fail before mutation. PostgreSQL tests preload the official
+`postgres:16-bookworm` image and run Docker-isolated drills alongside ordinary
+full/selected restore dataset checks. Scripted Docker failure tests cover
+restore/validation/cleanup failures and cancellation, stopped preserved targets,
+separate evidence and corruption/dry-run guards before container creation.
 
 Setup tests inject a fake Prompter for all database/storage combinations, partial
 flags, existing-file approval/cancel, transient password redaction and failed tests.

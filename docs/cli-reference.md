@@ -46,7 +46,7 @@ All commands inherit the following root flags:
 |---|---|---|---|---|
 | `--config` | `-c` | string | `"dbvault.yaml"` | Path to the YAML configuration file. |
 | `--verbose` | `-v` | boolean | `false` | Enable detailed debug log output. |
-| `--json` | | boolean | `false` | Format stdout/stderr logs as JSON lines. |
+| `--json` | | boolean | `false` | Alias for `--output json`: one stdout result, structured stderr logs/errors. |
 | `--help` | `-h` | boolean | `false` | Display help information for the command. |
 
 ### Exit Codes
@@ -173,9 +173,48 @@ dbvault recovery drill --target BACKUP-NAME --recovery-database NEW-SQLITE-PATH 
 dbvault recovery drill --target BACKUP-NAME --recovery-database NEW-SQLITE-PATH --confirm [--cleanup] [--timeout 2h] [--output json]
 ```
 
-V1 supports **SQLite only**. PostgreSQL/MySQL/MongoDB return an unsupported error
-before contacting the database or creating a recovery target. No aliases, force
-bypass, Docker dependency or arbitrary validation hook are provided.
+SQLite support shipped in `v0.3.0`. The checkout also supports **PostgreSQL in a
+new Docker-isolated server (Unreleased)**. MySQL/MongoDB return an unsupported
+error before contacting the database or creating a recovery target. No force
+bypass, existing-server target or arbitrary validation hook is provided.
+
+### PostgreSQL (Unreleased)
+
+```bash
+docker pull postgres:16-bookworm # use the source major from the backup
+dbvault recovery drill --target BACKUP-NAME --recovery-database recovery_check --dry-run
+dbvault recovery drill --target BACKUP-NAME --recovery-database recovery_check --confirm --cleanup
+```
+
+The recovery database must be a lowercase name (letters, digits and underscores,
+starting with a letter, at most 63 characters), different from the configured
+and manifest source and PostgreSQL system databases. The CLI requires a trusted
+Docker daemon and preloaded official `postgres:<source-major>-bookworm` image.
+It never pulls images automatically. Source server/credentials and configured
+host tool paths are not used. Arbitrary images and external recovery servers
+are unsupported; extensions missing from the official image cause failure.
+
+After stored-byte verification, create a container by pinned local image ID,
+with random credentials, network `none`, no ports/host binds/shared volumes, and
+anonymous database volumes. Inspect its exact ID, image, ownership label and
+isolation before commands and cleanup. Native tools execute only inside it.
+Restore uses the normal verified snapshot/decompression pipeline, then a
+read-only catalog query and scans ordinary tables/populated materialized views.
+Unpopulated materialized views are counted but not scanned. The
+recorded object count and elapsed time do not prove application semantics,
+expected row equality or production-equivalent recovery time.
+
+Dry-run verifies the archive and checks image availability/source major only;
+live compatibility, restore and validation are skipped. It creates no container
+or recovery record. Real runs retain the container by default and on failure.
+`--cleanup` removes only this invocation's container and anonymous volumes after
+successful validation. Retained containers are stopped on success/failure/cancellation;
+if the daemon cannot stop one, the command reports an error. The JSON
+`recovery_target` is the container ID, usable with `docker inspect ID` and
+`docker start ID` for inspection; retained targets need operator lifecycle management.
+No local native tools or Docker-socket mounts in backup images are required.
+
+### SQLite
 
 `--target` follows existing restore resolution: backup name from `list`, not its
 manifest ID; local paths must resolve inside storage. `--recovery-database` is a

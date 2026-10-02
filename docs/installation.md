@@ -2,8 +2,8 @@
 
 This document describes how to install DBVault, configure native database dependencies across supported operating systems, and verify your environment.
 
-Go 1.26+ is required to build the current implementation. Release `v0.2.0`
-includes the latest published binary archives; the tag-triggered workflow builds
+Go 1.26+ is required to build the current implementation. Published releases
+include binary archives; the tag-triggered workflow builds
 Linux amd64/arm64, macOS amd64/arm64 and Windows amd64, injecting the real tag,
 commit and UTC build time into `dbvault version`. It publishes archives only when
 maintainers push a release tag. Native database tools are not included in those
@@ -161,8 +161,10 @@ Use `--target mysql`, `mongodb` or `sqlite` for other engines. Native client
 versions are tied to their base image: PostgreSQL 16, MySQL 8.4, MongoDB 8.0
 Database Tools. Every runtime uses a non-root user. Mount a config, private
 backup directory and any SQLite database with permissions for that user.
-Set credentials by environment variable name/secret injection. Images have not
-been published. For builds, `VERSION`, `COMMIT` and `BUILD_DATE` are optional
+Set credentials by environment variable name/secret injection. The new release
+workflow publishes Linux amd64/arm64 images to GHCR after binary release success.
+The first publication requires the next intentional release tag; no new images
+are published merely by modifying this checkout. For builds, `VERSION`, `COMMIT` and `BUILD_DATE` are optional
 build arguments; their defaults identify development builds.
 
 To package an already cross-compiled Linux binary, Buildx can override the build
@@ -170,6 +172,55 @@ stage with a named context:
 `docker build --build-context build=bin/linux-amd64 --target postgres -t dbvault:postgres .`
 The context directory must contain the executable named `dbvault` for the image's
 architecture. This route was used to smoke-test all four final runtime targets.
+
+#### Versioned registry images (next release)
+
+Tags include the DBVault version and bundled engine/client version:
+
+| Engine | Image tag pattern |
+|---|---|
+| PostgreSQL 16 | `ghcr.io/sung2708/dbvault:vX.Y.Z-postgres16` |
+| MySQL 8.4 | `ghcr.io/sung2708/dbvault:vX.Y.Z-mysql8.4` |
+| MongoDB 8 | `ghcr.io/sung2708/dbvault:vX.Y.Z-mongodb8` |
+| SQLite | `ghcr.io/sung2708/dbvault:vX.Y.Z-sqlite` |
+
+Replace `vX.Y.Z` with an actual published tag. Pin the returned image digest for
+repeatable deployments. Maintainers must verify GHCR package visibility/access
+after the first push; workflow publication does not itself make a package public.
+
+For a local build, this Bash example mounts a reviewed config and private backup
+directory, and passes a password by environment-variable name:
+
+```bash
+docker build --target postgres -t dbvault:postgres .
+# Set DB_PASSWORD securely in the current environment first.
+docker run --rm --env DB_PASSWORD \
+  --mount type=bind,src="$PWD/dbvault.yaml",dst=/config/dbvault.yaml,readonly \
+  --mount type=bind,src="$PWD/backups",dst=/backups \
+  dbvault:postgres backup --config /config/dbvault.yaml
+```
+
+Use `/backups` as the local storage path in the mounted config and ensure the
+directory is writable by the image's non-root user. The database host must be
+reachable from the container; `localhost` refers to the container itself.
+For scheduling, use the [CronJob example](scheduling.md#4-kubernetes-cronjob).
+
+#### PostgreSQL recovery drills
+
+The checkout supports drills on the CLI host using a trusted Docker daemon and
+a preloaded official `postgres:<source-major>-bookworm` image. No host database
+tools or production credentials are used by the drill. Run it on the host;
+the published backup images do not include Docker or a mounted Docker socket.
+
+```bash
+docker pull postgres:16-bookworm
+dbvault recovery drill --target ACTUAL-BACKUP-NAME --recovery-database recovery_check --dry-run
+dbvault recovery drill --target ACTUAL-BACKUP-NAME --recovery-database recovery_check --confirm --cleanup
+```
+
+The example is for a PostgreSQL 16 backup. Extensions must be present in the
+official target image; an unavailable extension makes the drill fail rather than
+claiming recoverability. Custom images/hooks and existing-server targets are unsupported.
 
 ---
 

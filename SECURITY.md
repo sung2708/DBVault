@@ -8,8 +8,8 @@ The DBVault project takes security seriously. This policy describes our supporte
 
 | Version | Supported | Notes |
 |---|:---:|---|
-| `0.1.x` (Upcoming) | Yes | Active development version |
-| `< 0.1.0` | No | Pre-release development snapshots |
+| Latest published stable release | Yes | Fixes ship in a new release; see GitHub Releases |
+| Older releases and development snapshots | No | Upgrade before requesting maintenance support |
 
 ---
 
@@ -17,13 +17,10 @@ The DBVault project takes security seriously. This policy describes our supporte
 
 If you believe you have discovered a security vulnerability in DBVault, please **do NOT report it via public GitHub issues, discussions, or pull requests.**
 
-Instead, please report security concerns privately through one of the following channels:
+Instead, please report security concerns privately through GitHub:
 
 1. **GitHub Private Vulnerability Reporting:**
    Open a private advisory via [GitHub Security Advisories](https://github.com/sung2708/DBVault/security/advisories/new).
-2. **Security Contact:**
-   Contact the repository maintainers directly:
-   `[MAINTAINER_SECURITY_EMAIL_PLACEHOLDER: Please configure contact email or use GitHub Advisories]`
 
 ### What to Include in Your Report
 To help us triage and resolve the issue quickly, please provide:

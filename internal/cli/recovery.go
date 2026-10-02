@@ -16,11 +16,11 @@ import (
 )
 
 func (o *options) recoveryCommand() *cobra.Command {
-	root := &cobra.Command{Use: "recovery", GroupID: "operations", Short: "Run controlled recovery tests in isolated targets", Long: "Recovery drills perform a real isolated restore followed by built-in validation.\nV1 supports SQLite only, into an explicitly selected NEW file. Server-engine\nisolation is not implemented and fails closed. No production-target bypass exists.", Args: noPositionalArgs, Example: "  dbvault recovery drill --help"}
+	root := &cobra.Command{Use: "recovery", GroupID: "operations", Short: "Run controlled recovery tests in isolated targets", Long: "Recovery drills perform a real isolated restore followed by built-in validation.\nSQLite uses a NEW file; PostgreSQL uses a newly created network-isolated Docker\nserver with fresh credentials. MySQL and MongoDB fail closed.", Args: noPositionalArgs, Example: "  dbvault recovery drill --help"}
 	var drill app.DrillOptions
 	var timeout time.Duration
-	c := &cobra.Command{Use: "drill --target <backup-name> --recovery-database <new-sqlite-path>", Short: "Restore a SQLite backup into a new isolated file and validate it",
-		Long:    "Restore the backup name returned by list into a NEW SQLite file.\nThe parent directory must exist and must be private to the operator. Existing\ntargets, links, source/production aliases and SQLite sidecars are refused.\n\n--confirm authorizes creating and restoring the isolated target. --dry-run\nverifies/preflights without creating it and is not a successful recovery drill.\nTargets are preserved by default and on failure/cancellation. --cleanup removes\nonly the file created by this run after successful validation and ownership checks.\nResults are saved as separate .recovery.json objects in the backup storage.\nChecksum integrity, restore completion and post-restore validation stay distinct.\nOnly SQLite is supported; PostgreSQL/MySQL/MongoDB fail before target mutation.",
+	c := &cobra.Command{Use: "drill --target <backup-name> --recovery-database <new-target>", Short: "Restore a SQLite or PostgreSQL backup into an isolated target",
+		Long:    "Restore the backup name returned by list into a NEW SQLite file or a NEW\nPostgreSQL Docker server. SQLite requires an existing private parent directory;\nexisting targets, links, source aliases and sidecars are refused. PostgreSQL\nrequires Docker and a preloaded postgres:<source-major>-bookworm image. It uses\nno external network, published ports, host binds or source credentials.\n\n--confirm authorizes creating and restoring the isolated target. --dry-run\nverifies/preflights without creating it and is not successful recovery evidence;\nPostgreSQL dry-run checks the image only, not a live server. Targets are preserved\nby default and on failure/cancellation. --cleanup removes only this run's target\nand its anonymous Docker volumes after successful validation and ownership checks.\nResults are saved as separate .recovery.json objects in backup storage.\nMySQL and MongoDB fail before target mutation.",
 		Example: "  dbvault recovery drill --target backup.sqlite.gz --recovery-database ./recovery/new.sqlite --dry-run\n  dbvault recovery drill --target backup.sqlite.gz --recovery-database ./recovery/new.sqlite --confirm\n  dbvault recovery drill --target backup.sqlite.gz --recovery-database ./recovery/another.sqlite --confirm --cleanup --output json",
 		Args:    noPositionalArgs, PreRunE: func(*cobra.Command, []string) error {
 			if drill.Target == "" || drill.RecoveryDatabase == "" {
@@ -43,8 +43,8 @@ func (o *options) recoveryCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if cfg.Database.Type != "sqlite" {
-				return fault.Wrap(fault.Unsupported, "recovery drill", fmt.Errorf("safe recovery drills currently support SQLite only; server target isolation is not implemented"))
+			if cfg.Database.Type != "sqlite" && cfg.Database.Type != "postgres" {
+				return fault.Wrap(fault.Unsupported, "recovery drill", fmt.Errorf("safe recovery drills support SQLite and Docker-isolated PostgreSQL only"))
 			}
 			adapter, err := databaseAdapter(cfg, "", o.redactor)
 			if err != nil {
@@ -75,10 +75,10 @@ func (o *options) recoveryCommand() *cobra.Command {
 		},
 	}
 	c.Flags().StringVarP(&drill.Target, "target", "t", "", targetHelp)
-	c.Flags().StringVar(&drill.RecoveryDatabase, "recovery-database", "", "NEW isolated SQLite file; existing parent directory required")
+	c.Flags().StringVar(&drill.RecoveryDatabase, "recovery-database", "", "NEW SQLite file or lowercase database name in a new PostgreSQL container")
 	c.Flags().BoolVar(&drill.Confirm, "confirm", false, "Authorize creating and restoring the isolated target")
 	c.Flags().BoolVar(&drill.DryRun, "dry-run", false, "Verify and preflight without creating or restoring the target")
-	c.Flags().BoolVar(&drill.Cleanup, "cleanup", false, "Remove this run's owned file only after successful validation")
+	c.Flags().BoolVar(&drill.Cleanup, "cleanup", false, "Remove this run's owned target only after successful validation")
 	c.Flags().DurationVar(&timeout, "timeout", 2*time.Hour, "Overall recovery-drill deadline")
 	root.AddCommand(c)
 	return root

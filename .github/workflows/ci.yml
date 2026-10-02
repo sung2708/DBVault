@@ -61,3 +61,42 @@ jobs:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: '0'
+  containers:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        target: [postgres, mysql, mongodb, sqlite]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          load: true
+          tags: dbvault:smoke
+          build-args: |
+            VERSION=dev
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=smoke-${{ matrix.runner }}-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=smoke-${{ matrix.runner }}-${{ matrix.target }}
+      - name: CLI and bundled native tools run as a non-root user
+        shell: bash
+        env:
+          ENGINE: ${{ matrix.target }}
+        run: |
+          docker run --rm dbvault:smoke version --output json
+          docker run --rm dbvault:smoke --help
+          if [ "$ENGINE" != sqlite ]; then
+            test "$(docker run --rm --entrypoint id dbvault:smoke -u)" != 0
+            case "$ENGINE" in
+              postgres) tools="pg_dump pg_restore psql" ;;
+              mysql) tools="mysqldump mysql" ;;
+              mongodb) tools="mongodump mongorestore" ;;
+            esac
+            for tool in $tools; do docker run --rm --entrypoint "$tool" dbvault:smoke --version; done
+          else
+            test "$(docker image inspect --format '{{.Config.User}}' dbvault:smoke)" = 65532
+          fi

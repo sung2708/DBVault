@@ -181,7 +181,7 @@ func (r *Renderer) Result(operation string, value any) error {
 		fmt.Fprintln(&b, r.status(kind, v.Status, false))
 		r.field(&b, "Backup", v.BackupName)
 		r.field(&b, "Engine", Engine(v.Engine))
-		r.field(&b, "Recovery file", v.RecoveryTarget)
+		r.field(&b, "Recovery target", v.RecoveryTarget)
 		r.field(&b, "Target state", v.TargetState)
 		r.field(&b, "Duration", FormatDuration(time.Duration(v.DurationSeconds*float64(time.Second))))
 		for _, stage := range v.Stages {
@@ -203,7 +203,7 @@ func (r *Renderer) Result(operation string, value any) error {
 		if v.DryRun {
 			r.hint(&b, "No restore was performed; preflight is not evidence of successful recovery.")
 		} else {
-			r.hint(&b, "Validation checks SQLite structure and catalog readability, not application business invariants.")
+			r.hint(&b, "Validation checks database structure/readability, not application business invariants.")
 			if v.TargetState == "preserved" {
 				r.hint(&b, "Recovery target was preserved for inspection: "+r.safe(v.RecoveryTarget))
 			}

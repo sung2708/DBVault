@@ -42,25 +42,16 @@ mysql --version
 
 ## 2. Installation
 
-Clone and compile DBVault locally:
+Download a prebuilt executable from [GitHub Releases](https://github.com/sung2708/DBVault/releases)
+and place it on `PATH`. This requires no Go installation. Alternatively, with Go:
 
 ```bash
-# Clone the repository
-git clone https://github.com/sung2708/DBVault.git
-cd DBVault
-
-# Build the executable
-go build -o bin/dbvault ./cmd/dbvault
-
-# Add to your PATH or copy to a system binary location
-# Linux/macOS:
-sudo cp bin/dbvault /usr/local/bin/
-
-# Windows (PowerShell as Administrator):
-# Copy-Item bin\dbvault.exe C:\Windows\System32\
+go install github.com/sung2708/DBVault/cmd/dbvault@latest
 ```
 
-Verify the binary runs:
+Add Go's binary directory to your user `PATH`; see the
+[installation guide](installation.md#install-with-go). To use Unreleased checkout
+features, build from source instead of installing `@latest`. Verify the binary runs:
 ```bash
 dbvault --help
 ```

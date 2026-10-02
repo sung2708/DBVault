@@ -338,7 +338,7 @@ func TestRecoveryReplacementBeforeRestoreCannotReachProduction(t *testing.T) {
 }
 
 func TestRecoveryUnsupportedAndEvidenceValidation(t *testing.T) {
-	for _, engine := range []string{"postgres", "mysql", "mongodb"} {
+	for _, engine := range []string{"mysql", "mongodb"} {
 		s, _, dir := recoveryFixture(t, "none")
 		s.Config.Database.Type = engine
 		if _, err := s.RecoveryDrill(context.Background(), DrillOptions{Target: "backup", RecoveryDatabase: filepath.Join(dir, "new.sqlite"), Confirm: true}); err == nil {

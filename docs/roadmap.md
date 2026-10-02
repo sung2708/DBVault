@@ -8,16 +8,17 @@ This document outlines the phased development roadmap for DBVault, based on an a
 
 The repository implements all four database engines and storage providers,
 Slack, retention and persistent cron schedules. See
-[verified status](implementation-status.md) for executed checks. Incremental and
+[verified status](implementation-status.md) for executed checks.
 Incremental/differential recovery chains, client-side encryption and live-cloud
 validation remain separate future milestones.
 
-### Recovery operations (Unreleased)
+### Recovery operations
 
-- [x] Safe SQLite recovery-drill CLI with isolated restore, structural validation,
+- [x] SQLite recovery-drill CLI (`v0.3.0`) with isolated restore, structural validation,
   owned cleanup and immutable exact-backup health evidence.
-- [ ] Safe native PostgreSQL/MySQL/MongoDB recovery drills with proven server/
-  credential isolation and corresponding real integration evidence.
+- [x] PostgreSQL recovery drills in new Docker-isolated servers (Unreleased).
+- [ ] MySQL/MongoDB recovery drills with proven server/credential isolation
+  and corresponding real integration evidence.
 
 ### Available in Phase 0:
 - [x] Comprehensive architectural blueprint and pipeline design.
@@ -59,7 +60,10 @@ Phase 1 delivered an end-to-end backup and restore workflow for PostgreSQL to lo
 - [x] **Zstandard:** streaming github.com/klauspost/compress/zstd.
 - [x] **Slack Notifications:** HTTPS completion/failure messages; delivery outages do not alter backup results.
 - [x] **Local Container Packaging:** Four non-root runtime targets for PostgreSQL, MySQL, MongoDB and SQLite; builds and version/native-client checks executed locally.
-- [ ] **Container Packaging:** Official multi-arch Docker image containing DBVault and native client binaries (`pg_dump`, `mysqldump`).
+- [x] **Container release workflow (Unreleased):** Versioned GHCR images for four
+  runtime targets, Linux amd64/arm64, published after intentional release tags.
+- [ ] **First official container publication:** Execute the prepared workflow on
+  the next maintainer-approved release and verify registry access.
 - [x] **In-Process Scheduler:** Five-field cron, persistent CRUD, timezones, overlap prevention and cancellation.
 
 ---

@@ -5,19 +5,24 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sung2708/DBVault/internal/app"
+	"github.com/sung2708/DBVault/internal/cli"
 	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/database"
 	"github.com/sung2708/DBVault/internal/database/postgres"
 	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/security"
 	"github.com/sung2708/DBVault/internal/storage/local"
+	"gopkg.in/yaml.v3"
 )
 
 // containerRunner uses vendor tools inside an isolated container. Secret
@@ -111,10 +116,17 @@ func TestPostgresBackupDestroyRestore(t *testing.T) {
 		return strings.TrimSpace(b.String())
 	}
 	query("CREATE TABLE items (id integer PRIMARY KEY, name text NOT NULL); INSERT INTO items SELECT n, 'fixture_' || n FROM generate_series(1,1000) AS n")
+	query("CREATE MATERIALIZED VIEW empty_view AS SELECT 42 AS value WITH NO DATA")
+	if err := native.Run(ctx, runner.Spec{Executable: "docker", Args: []string{"image", "inspect", "postgres:16-bookworm"}, Stdout: io.Discard}); err != nil {
+		if err := native.Run(ctx, runner.Spec{Executable: "docker", Args: []string{"pull", "postgres:16-bookworm"}, Stdout: io.Discard}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	before := query("SELECT md5(string_agg(id || ':' || name, ',' ORDER BY id)) FROM items")
 	for _, kind := range []string{"none", "gzip", "zstd"} {
 		t.Run(kind, func(t *testing.T) {
-			store, err := local.New(t.TempDir())
+			backupDir := t.TempDir()
+			store, err := local.New(backupDir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +138,85 @@ func TestPostgresBackupDestroyRestore(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertBackupHealth(t, ctx, s, m)
-			query("DROP TABLE items")
+			dry, err := s.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: "dbvault_recovery", DryRun: true})
+			if err != nil || dry.Status != "preflight_passed" || dry.RecoveryTarget != "" || dry.RecordKey != "" {
+				t.Fatal(dry, err)
+			}
+			drill, err := s.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: "dbvault_recovery", Confirm: true})
+			if err != nil || drill.Status != "passed" || drill.Validation == nil || drill.Validation.Objects != 2 {
+				t.Fatal(drill, err)
+			}
+			defer func() {
+				cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := native.Run(cleanup, runner.Spec{Executable: "docker", Args: []string{"rm", "--force", "--volumes", drill.RecoveryTarget}, Stdout: io.Discard}); err != nil {
+					t.Error(err)
+				}
+			}()
+			drillRunner := containerRunner{native: native, container: drill.RecoveryTarget}
+			if err := native.Run(ctx, runner.Spec{Executable: "docker", Args: []string{"start", drill.RecoveryTarget}, Stdout: io.Discard}); err != nil {
+				t.Fatal(err)
+			}
+			// Retained targets are stopped by the drill. Wait for PostgreSQL after
+			// restarting this exact container solely to compare the fixture dataset.
+			for {
+				if err := drillRunner.Run(ctx, runner.Spec{Executable: "pg_isready", Args: []string{"--quiet"}, Stdout: io.Discard}); err == nil {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				case <-time.After(250 * time.Millisecond):
+				}
+			}
+			var restored bytes.Buffer
+			if err := drillRunner.Run(ctx, runner.Spec{Executable: "psql", Args: []string{"--no-psqlrc", "--tuples-only", "--no-align", "--set=ON_ERROR_STOP=1", "--command=SELECT md5(string_agg(id || ':' || name, ',' ORDER BY id)) FROM items"}, Env: map[string]string{"PGDATABASE": "dbvault_recovery", "PGUSER": "postgres"}, Stdout: &restored}); err != nil || strings.TrimSpace(restored.String()) != before {
+				t.Fatal("drill dataset mismatch", err)
+			}
+			if query("SELECT md5(string_agg(id || ':' || name, ',' ORDER BY id)) FROM items") != before {
+				t.Fatal("drill changed production")
+			}
+			evidence, err := s.Store.Get(ctx, drill.RecordKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := app.DecodeDrill(evidence)
+			evidence.Close()
+			if err != nil || decoded.Engine != "postgres" || decoded.Status != "passed" {
+				t.Fatal(decoded, err)
+			}
+			health, err := s.Health(ctx, false)
+			if err != nil || health.Databases[0].RestoreTest != "passed" {
+				t.Fatal(health, err)
+			}
+			cliConfig := cfg
+			cliConfig.Database.Host = "unreachable.invalid" // Drill must not contact production.
+			cliConfig.Database.PasswordEnv = "DBVAULT_UNUSED_PRODUCTION_PASSWORD"
+			cliConfig.Storage.Type = "local"
+			cliConfig.Storage.Local.Path = backupDir
+			configData, err := yaml.Marshal(cliConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configPath := filepath.Join(t.TempDir(), "drill.yaml")
+			if err := os.WriteFile(configPath, configData, 0600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			root := cli.New(cli.Build{}, &stdout, &stderr)
+			root.SetContext(ctx)
+			root.SetArgs([]string{"recovery", "drill", "--config", configPath, "--target", m.Name, "--recovery-database", "cleanup_recovery", "--confirm", "--cleanup", "--output", "json"})
+			if err := root.Execute(); err != nil {
+				t.Fatal(err, stderr.String())
+			}
+			var removed app.DrillResult
+			if err := json.Unmarshal(stdout.Bytes(), &removed); err != nil || stderr.Len() != 0 || removed.Status != "passed" || removed.TargetState != "removed" {
+				t.Fatal(removed, err, stdout.String(), stderr.String())
+			}
+			if err := native.Run(ctx, runner.Spec{Executable: "docker", Args: []string{"inspect", removed.RecoveryTarget}, Stdout: io.Discard}); err == nil {
+				t.Fatal("recovery cleanup left container")
+			}
+			query("DROP MATERIALIZED VIEW empty_view; DROP TABLE items")
 			if err = s.Restore(ctx, m.Name, true, false, database.RestoreOptions{}); err != nil {
 				t.Fatal(err)
 			}

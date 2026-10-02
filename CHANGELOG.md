@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- PostgreSQL recovery drills restore verified backups into newly created Docker
+  servers with fresh credentials, no external network or host binds, read-only
+  catalog/table readability validation, exact-backup health evidence and optional
+  owned-container/anonymous-volume cleanup. Requires a preloaded official image
+  matching the source major; failed targets are preserved for inspection.
+- Tag-triggered GHCR publication for versioned PostgreSQL 16, MySQL 8.4,
+  MongoDB 8 and SQLite images on Linux amd64/arm64, with provenance/SBOM.
+  CI builds and smoke-tests each runtime on both architectures.
+
+### Changed
+- Installation and quick-start documentation distinguish published artifacts
+  from checkout capabilities; security support policy uses the latest stable release.
+
 ## [v0.3.0] - 2026-10-02
 
 ### Added

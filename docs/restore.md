@@ -19,12 +19,14 @@ evidence with the exact backup without altering immutable manifests. Missing
 production files do not prevent embedded-engine preflight, provided source parent
 is resolvable. No production safety bypass or shell validation hooks exist.
 
-PostgreSQL/MySQL/MongoDB operator-facing drills are **unsupported** in V1 and fail
-closed: current adapters do not prove isolated-server/credential ownership and
-SQL dumps/custom archives can contain executable SQL. Existing normal restore
-and previously executed test-harness drills remain available, with their existing
-confirmation contract. See [CLI semantics](cli-reference.md#dbvault-recovery-drill)
-and [ADR-0010](adr/0010-safe-recovery-drills.md).
+The checkout adds **PostgreSQL drills (Unreleased)** in a newly created Docker
+server using fresh credentials, no external network, ports or host binds. It
+reuses the verified snapshot and performs read-only catalog/table readability
+checks. Preload the trusted official image matching the source major; see
+[PostgreSQL drill setup](installation.md#postgresql-recovery-drills) and
+[ADR-0011](adr/0011-postgresql-container-recovery.md).
+MySQL/MongoDB drills remain unsupported. Existing normal restore follows its
+existing confirmation contract. See [CLI semantics](cli-reference.md#dbvault-recovery-drill).
 
 All adapters verify the exact compressed snapshot before writes. MySQL restores
 SQL through `mysql`; MongoDB restores native archives, supports `--collection`
