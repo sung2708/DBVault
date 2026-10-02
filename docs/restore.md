@@ -3,7 +3,7 @@
 A backup is only as good as its proven ability to restore. This document details DBVault's restoration lifecycle, pre-flight safety validations, and recovery testing drills.
 
 For new dated destinations, destination safety backups, interactive selection,
-restore history and verified file exports on the Unreleased `develop` checkout,
+restore history and verified file exports starting with v0.5.0,
 see [restore workflows](restore-workflows.md).
 
 ## Safe operator-facing recovery drill (SQLite V1)

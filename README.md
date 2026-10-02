@@ -35,11 +35,13 @@ running `doctor`. Configure `health.max_backup_age` and enable
 `protection.verify_after_backup` for recorded integrity checks. For recovery testing,
 see [recovery drills](docs/cli-reference.md#dbvault-recovery-drill).
 
-Release `v0.4.0` adds Docker-isolated PostgreSQL recovery drills and versioned GHCR
-images. Downloads and registry images become available after the release workflow
-succeeds; `go install @latest` installs the latest published tag. See the [changelog](CHANGELOG.md).
+Release `v0.5.0` adds restore workflows, history, exports and clearer CLI results.
+Downloads and versioned GHCR images become available after the release workflow
+succeeds. Install this release with
+`go install github.com/sung2708/DBVault/cmd/dbvault@v0.5.0`.
+See the [changelog](CHANGELOG.md).
 
-On the current `develop` checkout (Unreleased), restore can create a destination
+Restore can create a destination
 named with UTC date/time, optionally back up an existing destination before
 overwriting, and record restore history. Inline backup selection is available in
 a terminal; JSON and automation remain flag-driven. See [restore workflows](docs/restore-workflows.md).

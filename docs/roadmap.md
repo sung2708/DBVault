@@ -15,9 +15,9 @@ validation remain separate future milestones.
 ### Recovery operations
 
 - [x] New dated restore destinations, destination safety backups, restore history
-  and verified exports (Unreleased, `develop`).
+  and verified exports (`v0.5.0`).
 - [x] Inline restore selection, source/destination plans and structured results
-  (Unreleased); JSON/automation never prompt.
+  (`v0.5.0`); JSON/automation never prompt.
 
 - [x] SQLite recovery-drill CLI (`v0.3.0`) with isolated restore, structural validation,
   owned cleanup and immutable exact-backup health evidence.

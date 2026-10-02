@@ -4,6 +4,16 @@ This document outlines DBVault's security model, threat landscape, mitigation co
 
 ## Implemented controls and limits
 
+Restore workflows in v0.5.0 refuse existing new-target names/files. Optional
+destination safety backups are full and verified before restore writes; failure
+aborts the restore. MongoDB requires operator-quiesced writes and has no atomic
+database-name reservation. History omits credentials and raw native errors, but
+is neither signed audit evidence nor a guarantee of application data completeness.
+History storage failure preserves and reports the actual restore outcome; a
+successful restore must not be repeated merely to retry recording. Export
+verifies stored bytes and exclusively creates its output file. See
+[restore workflows](restore-workflows.md) for retention and concurrency limits.
+
 Safe recovery drill V1 creates only a new isolated SQLite file, using resolved
 parent paths, exclusive creation, filesystem identity checks and separate
 immutable evidence records. Existing files/links/sidecars, production/source

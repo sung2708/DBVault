@@ -1,13 +1,21 @@
 # Verified implementation status
 
-## Restore workflows (Unreleased, develop)
+## Restore workflows (`v0.5.0`)
 
-The current checkout adds new destinations named with UTC date/time, optional
+Release v0.5.0 adds new destinations named with UTC date/time, optional
 full verified destination backups, source/destination plans, terminal backup
 selection, structured restore results/history and verified file exports.
 See [restore workflows](restore-workflows.md) for engine creation permissions,
-MongoDB lazy creation/concurrency, retention and validation limits. Published
-v0.4.0 remains the release snapshot described below.
+MongoDB lazy creation/concurrency, retention and validation limits.
+
+Verified locally on Windows: unit/race suites, vet, module verification and build.
+Native PostgreSQL, MySQL and MongoDB workflows and S3/GCS/Azure emulator workflows
+passed in separate integration runs, including new destinations, refusal of
+existing targets, full safety backups, rollback data checks, history and exports.
+SQLite CLI acceptance also covered preview, restore, overwrite protection,
+history, exports and automation output. Combined runs exceeded deadlines on the
+local Docker host; pending groups were rerun separately and passed. Remote
+release artifacts and container publication require the release workflow to pass.
 
 Release snapshot `v0.4.0`, 2026-10-02. The tag-triggered workflow publishes binary
 archives and versioned GHCR images after validation. Registry publication and

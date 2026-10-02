@@ -1,9 +1,8 @@
-# Restore destinations, history and export (Unreleased)
+# Restore destinations, history and export
 
-These features are implemented on `develop`; published v0.4.0 binaries do not
-include them. Build the checkout with `go build -o ./bin/dbvault ./cmd/dbvault`.
-On Windows, use `go build -o .\bin\dbvault.exe ./cmd/dbvault`, then invoke
-`.\bin\dbvault.exe` to try this checkout's CLI.
+These features are available starting with v0.5.0. Install with
+`go install github.com/sung2708/DBVault/cmd/dbvault@v0.5.0` or download the matching
+binary from [GitHub Releases](https://github.com/sung2708/DBVault/releases/tag/v0.5.0).
 
 ## Restore into a new database or file
 

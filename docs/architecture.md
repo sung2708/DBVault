@@ -4,6 +4,14 @@ This document describes the architectural principles, component structure, data 
 
 ## Current implementation contract
 
+Restore workflows in v0.5.0 add adapter interfaces for new-target preflight and
+creation and for full safety backups without selection filters. The application
+reuses a verified snapshot, coordinates optional destination protection and
+post-restore checks, and stores separate versioned restore history records.
+Export shares snapshot verification and exclusively creates a local output file.
+These history records do not replace recovery-drill evidence consumed by health.
+See [ADR-0012](adr/0012-restore-workflows-and-history.md).
+
 [ADR-0007](adr/0007-verified-local-foundation.md) resolves format/naming/security
 ambiguities in this blueprint. Actual interfaces live in `internal/database`,
 `internal/storage`, `internal/compression` and `internal/exec`; the sketches below
