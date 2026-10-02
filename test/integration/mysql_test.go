@@ -23,7 +23,7 @@ import (
 func TestMySQLBackupDestroyRestore(t *testing.T) {
 	secret := "development-only-db-vault-password"
 	native := runner.Native{Redactor: security.New(secret)}
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	if _, err := native.LookPath("docker"); err != nil {
 		t.Fatalf("Docker required (NOT RUN): %v", err)
@@ -92,6 +92,9 @@ func TestMySQLBackupDestroyRestore(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertBackupHealth(t, ctx, s, m)
+			if kind == "none" {
+				assertNewRestoreWorkflow(t, ctx, s, m)
+			}
 			query("DROP TABLE items")
 			if err = s.Restore(ctx, m.Name, true, false, database.RestoreOptions{}); err != nil {
 				t.Fatal(err)

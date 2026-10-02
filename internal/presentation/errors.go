@@ -66,6 +66,9 @@ func (r *Renderer) ErrorTo(w io.Writer, operation, usage, help string, err error
 	for _, line := range strings.Split(detail, "\n") {
 		fmt.Fprintln(w, "  "+Sanitize(line))
 	}
+	if cause != nil && cause.Kind == fault.Dependency {
+		fmt.Fprintln(w, "\nRun dbvault doctor to locate missing native tools. Install the client tools matching your database version, then set database.tools paths or add them to PATH.")
+	}
 	fmt.Fprintf(w, "\nUsage:\n  %s\n\nRun %q for usage and examples.\n", usage, help)
 	if !r.options.Verbose && cause != nil && cause.Kind != fault.Configuration && cause.Kind != fault.Unsupported {
 		fmt.Fprintln(w, "Use --verbose for full diagnostic details.")

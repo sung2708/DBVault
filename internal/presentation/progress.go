@@ -10,6 +10,10 @@ import (
 )
 
 var stages = map[string][2]string{
+	"restore.create":        {"Checking and preparing new destination", "New destination checked/prepared"},
+	"restore.safety":        {"Backing up and verifying existing destination", "Destination safety backup verified"},
+	"restore.validation":    {"Checking restored destination", "Post-restore checks passed"},
+	"export.write":          {"Writing verified export", "Verified export written"},
 	"configuration":         {"Loading configuration", "Configuration loaded"},
 	"preflight":             {"Checking database connectivity and tools", "Database connection and tools verified"},
 	"backup.stream":         {"Creating, compressing and storing backup", "Backup stream stored"},

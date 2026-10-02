@@ -50,7 +50,7 @@ func (r mongoContainerRunner) Run(ctx context.Context, s runner.Spec) error {
 	return r.containerRunner.Run(ctx, s)
 }
 func TestMongoDBBackupDestroyRestore(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	secret := "development-only-mongo-password"
 	endpoint, r := containerEndpoint(t, ctx, "mongo:8.0", 27017, map[string]string{"MONGO_INITDB_ROOT_USERNAME": "dbvault", "MONGO_INITDB_ROOT_PASSWORD": secret})
@@ -109,6 +109,9 @@ func TestMongoDBBackupDestroyRestore(t *testing.T) {
 				t.Fatal(e)
 			}
 			assertBackupHealth(t, ctx, svc, m)
+			if codec == "none" {
+				assertNewRestoreWorkflow(t, ctx, svc, m)
+			}
 			if e = client.Database("source").Drop(ctx); e != nil {
 				t.Fatal(e)
 			}

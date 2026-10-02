@@ -39,6 +39,11 @@ Release `v0.4.0` adds Docker-isolated PostgreSQL recovery drills and versioned G
 images. Downloads and registry images become available after the release workflow
 succeeds; `go install @latest` installs the latest published tag. See the [changelog](CHANGELOG.md).
 
+On the current `develop` checkout (Unreleased), restore can create a destination
+named with UTC date/time, optionally back up an existing destination before
+overwriting, and record restore history. Inline backup selection is available in
+a terminal; JSON and automation remain flag-driven. See [restore workflows](docs/restore-workflows.md).
+
 > [!IMPORTANT]
 > **Audit Note (Current Implementation State):**
 > The repository contains working **PostgreSQL, MySQL, MongoDB and SQLite adapters with local/S3/GCS/Azure storage** (`github.com/sung2708/DBVault`). Release `v0.3.0` adds backup health, status, optional post-backup verification, SQLite recovery drills and native database tool discovery. See [verified status](docs/implementation-status.md) and [ADRs](docs/adr/README.md) for the implementation contract and test evidence.

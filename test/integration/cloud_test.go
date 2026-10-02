@@ -89,7 +89,7 @@ func waitReady(t *testing.T, ctx context.Context, fn func() error) {
 func TestCloudProvidersAndSQLiteRestore(t *testing.T) {
 	for _, kind := range []string{"s3", "gcs", "azure"} {
 		t.Run(kind, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 			cfg := config.Defaults()
 			cfg.Storage.Type = kind
@@ -152,6 +152,9 @@ func TestCloudProvidersAndSQLiteRestore(t *testing.T) {
 					t.Fatal("cloud post-upload verification evidence", verificationHealth, readErr)
 				}
 				assertBackupHealth(t, ctx, svc, m)
+				if codec == "none" {
+					assertCloudRestoreOperations(t, ctx, svc, m)
+				}
 				drillTarget := filepath.Join(t.TempDir(), "cloud-recovery.sqlite")
 				drill, err := svc.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: drillTarget, Confirm: true, Cleanup: true})
 				if err != nil || drill.Status != "passed" || drill.TargetState != "removed" {

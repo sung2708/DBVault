@@ -24,6 +24,58 @@ func (r *Renderer) Result(operation string, value any) error {
 	}
 	var b strings.Builder
 	switch v := value.(type) {
+	case app.RestoreResult:
+		if r.options.Quiet {
+			fmt.Fprintf(&b, "%s\t%s\n", r.safe(v.Status), r.safe(v.Database))
+			break
+		}
+		kind := "success"
+		if v.Status == "failed" || v.Status == "cancelled" {
+			kind = "error"
+		}
+		title := map[string]string{"completed": "Restore completed", "failed": "Restore failed", "cancelled": "Restore cancelled", "preview_passed": "Restore preview passed"}[v.Status]
+		r.title(&b, kind, title)
+		r.field(&b, "Backup", v.Backup.Name)
+		r.field(&b, "Backup time", FormatTime(v.Backup.CreatedAt))
+		r.field(&b, "Destination", v.Database)
+		if v.Host != "" {
+			r.field(&b, "Server", fmt.Sprintf("%s:%d", v.Host, v.Port))
+		}
+		validation := map[string]string{"not_run": "Not run", "structure_checked": "SQLite structure checked", "connectivity_checked": "Native restore and connectivity checked", "compatibility_checked": "Compatibility checked", "failed": "Failed"}[v.Validation]
+		r.field(&b, "Validation", validation)
+		if v.SafetyBackup != "" {
+			r.field(&b, "Safety backup", v.SafetyBackup)
+		}
+		r.field(&b, "Duration", FormatDuration(time.Duration(v.Duration*float64(time.Second))))
+		r.field(&b, "History", v.EvidenceStatus)
+		if v.RecordKey != "" {
+			r.field(&b, "Record", v.RecordKey)
+		}
+		if v.EvidenceStatus == "failed" {
+			r.hint(&b, "The restore status above reflects database work; saving history failed. Review the destination before retrying.")
+		} else if v.DryRun {
+			r.hint(&b, "Preview passed; no database or history writes. Use the displayed destination with --database to reuse this name.")
+		} else {
+			r.hint(&b, "Review restore history with dbvault history. Validate application data before resuming writes.")
+		}
+	case []app.RestoreResult:
+		r.title(&b, "header", "Restore history")
+		rows := [][]string{}
+		for _, v := range v {
+			rows = append(rows, []string{v.StartedAt.UTC().Format("2006-01-02 15:04Z"), v.Status, v.Database, v.Backup.Name})
+		}
+		r.table(&b, []string{"Time (UTC)", "Status", "Destination", "Backup"}, rows)
+	case app.ExportResult:
+		if r.options.Quiet {
+			fmt.Fprintln(&b, r.safe(v.File))
+			break
+		}
+		r.title(&b, "success", "Backup exported")
+		r.field(&b, "Backup", v.Backup)
+		r.field(&b, "File", v.File)
+		r.field(&b, "Size", FormatBytes(v.Bytes))
+		r.field(&b, "Decompressed", fmt.Sprint(v.Decompressed))
+		r.field(&b, "Stored SHA-256", v.Checksum)
 	case app.BackupResult:
 		if r.options.Quiet && v.Manifest.Name != "" {
 			if v.Verification.Requested {

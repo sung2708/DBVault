@@ -435,6 +435,10 @@ dbvault restore [flags]
 | `--clean` | | boolean | `false` | Drop backed-up PostgreSQL objects before restoring. |
 | `--timeout` | | duration | `4h` | Execution timeout for restore operation. |
 | `--database` | `-d` | string | Config | Override the destination database. |
+| `--new-database` | | boolean | `false` | Create a new destination; auto-name with UTC date/time unless `--database` is supplied (Unreleased). |
+| `--backup-before-restore` | | boolean | `false` | Create and verify a full existing-destination backup before writes (Unreleased). |
+| `--interactive` | | boolean | `false` | Select backup/destination with inline keyboard controls in a terminal (Unreleased). |
+| `--non-interactive` | | boolean | `false` | Never prompt; require explicit flags (Unreleased). |
 | `--dry-run` | | boolean | `false` | Verify archive, compatibility and connectivity without database writes. |
 | `--table` | | strings | Empty | Select PostgreSQL tables (repeatable/comma-separated). |
 | `--schema` | | strings | Empty | Select PostgreSQL schemas. |
@@ -442,8 +446,11 @@ dbvault restore [flags]
 Integrity checks are mandatory; there is no checksum bypass flag. Targets are
 flat storage keys or paths resolving directly within the configured local root.
 Restore dry-run does not require `--confirm`; it still makes a private verified
-temporary snapshot and contacts the target database. There is no interactive
-confirmation prompt. `--timeout 0` disables the deadline.
+temporary snapshot and contacts the target database. The Unreleased checkout
+offers inline selection/confirmation when `--target` is omitted in a terminal or
+`--interactive` is supplied. JSON, quiet and non-terminal input never prompt.
+`--timeout 0` disables the deadline. See [new restore workflows](restore-workflows.md)
+for `dbvault history`, `dbvault export` and per-engine creation limits.
 
 ### Examples
 ```bash

@@ -1,5 +1,14 @@
 # Verified implementation status
 
+## Restore workflows (Unreleased, develop)
+
+The current checkout adds new destinations named with UTC date/time, optional
+full verified destination backups, source/destination plans, terminal backup
+selection, structured restore results/history and verified file exports.
+See [restore workflows](restore-workflows.md) for engine creation permissions,
+MongoDB lazy creation/concurrency, retention and validation limits. Published
+v0.4.0 remains the release snapshot described below.
+
 Release snapshot `v0.4.0`, 2026-10-02. The tag-triggered workflow publishes binary
 archives and versioned GHCR images after validation. Registry publication and
 ARM64 runtime execution remain unverified locally; check the release workflow

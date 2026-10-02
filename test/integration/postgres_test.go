@@ -34,10 +34,16 @@ type containerRunner struct {
 }
 
 func (r containerRunner) LookPath(name string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	err := r.Run(ctx, runner.Spec{Executable: name, Args: []string{"--version"}, Stdout: io.Discard})
-	return name, err
+	// These vendor images provide the named tools in the container PATH.
+	// Preflight executes their real --version commands. Probing via a separate
+	// short-lived exec here can time out on a loaded Windows host and wrongly
+	// trigger toolresolve's host-installation fallback inside the container.
+	switch name {
+	case "pg_dump", "pg_restore", "psql", "mysqldump", "mysql", "mongodump", "mongorestore":
+		return name, nil
+	default:
+		return "", fmt.Errorf("unsupported container tool: %s", name)
+	}
 }
 func (r containerRunner) Run(ctx context.Context, s runner.Spec) error {
 	args := []string{"exec", "-i"}
@@ -63,7 +69,7 @@ func (r containerRunner) Run(ctx context.Context, s runner.Spec) error {
 func TestPostgresBackupDestroyRestore(t *testing.T) {
 	secret := "development-only-db-vault-password"
 	native := runner.Native{Redactor: security.New(secret)}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	if _, err := native.LookPath("docker"); err != nil {
 		t.Fatalf("integration infrastructure required (NOT RUN): %v", err)
@@ -138,6 +144,9 @@ func TestPostgresBackupDestroyRestore(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertBackupHealth(t, ctx, s, m)
+			if kind == "none" {
+				assertNewRestoreWorkflow(t, ctx, s, m)
+			}
 			dry, err := s.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: "dbvault_recovery", DryRun: true})
 			if err != nil || dry.Status != "preflight_passed" || dry.RecoveryTarget != "" || dry.RecordKey != "" {
 				t.Fatal(dry, err)

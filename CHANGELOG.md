@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Restore into new destinations with UTC date/time and unique names, explicit
+  names via `--database`, read-only dry-run checks and refusal of existing targets.
+- Optional full, verified destination backup with `--backup-before-restore`;
+  failures abort before restore writes. Backup filters are cleared for this copy.
+- Separate restore history with source manifest, destination, selectors, UTC
+  timestamps, status, validation and safety backup; read with `dbvault history`.
+- `dbvault export` verifies stored bytes before exporting to a new local file,
+  optionally removing outer compression while retaining the native engine format.
+
+### Changed
+- Restore offers inline keyboard selection in a terminal, a source/destination
+  plan, stage progress, post-restore checks and detailed results. JSON, quiet,
+  non-terminal and `--non-interactive` invocations never prompt.
+- Missing native-tool errors point to `dbvault doctor` and tool configuration.
+
 ## [v0.4.0] - 2026-10-02
 
 ### Added

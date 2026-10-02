@@ -67,7 +67,7 @@ func newWithUpdateService(b Build, out, errOut io.Writer, updates update.Service
 	installHelp(root, o)
 	root.AddGroup(&cobra.Group{ID: "core", Title: "Core Commands:"}, &cobra.Group{ID: "operations", Title: "Operations:"}, &cobra.Group{ID: "configuration", Title: "Configuration:"}, &cobra.Group{ID: "other", Title: "Other:"})
 	root.SetHelpCommandGroupID("other")
-	for _, name := range []string{"backup", "restore", "test", "list", "verify", "inspect", "delete", "cleanup", "config"} {
+	for _, name := range []string{"backup", "restore", "export", "history", "test", "list", "verify", "inspect", "delete", "cleanup", "config"} {
 		root.AddCommand(o.command(name))
 	}
 	root.AddCommand(&cobra.Command{Use: "version", Short: "Show build and runtime information", Long: "Show the DBVault version, Git commit, build time and Go runtime.\nNo configuration file or database connection is needed.", GroupID: "other", Args: noPositionalArgs, Example: "  dbvault version\n  dbvault version --json", RunE: func(c *cobra.Command, _ []string) error {
@@ -137,6 +137,10 @@ func (o *options) command(name string) *cobra.Command {
 		f.Bool("dry-run", false, "Validate tools and connectivity without writing a backup")
 		f.Duration("timeout", 2*time.Hour, "Operation limit; 0 disables timeout")
 	case "restore":
+		f.Bool("new-database", false, "Create a new destination; default name includes UTC date/time and a unique suffix")
+		f.Bool("backup-before-restore", false, "Create and verify a full backup of the existing destination before writing")
+		f.Bool("interactive", false, "Select backup and destination using inline keyboard controls (TTY only)")
+		f.Bool("non-interactive", false, "Never prompt; require explicit flags")
 		f.StringP("database", "d", "", "Override destination database name (SQLite: existing file)")
 		f.StringP("target", "t", "", targetHelp)
 		f.Bool("confirm", false, "Authorize destructive restore")
@@ -146,6 +150,13 @@ func (o *options) command(name string) *cobra.Command {
 		f.StringSlice("schema", nil, "PostgreSQL schemas to restore (repeat or comma-separate)")
 		f.StringSlice("collection", nil, "MongoDB collections to restore (repeat or comma-separate)")
 		f.Duration("timeout", 4*time.Hour, "Operation limit; 0 disables timeout")
+	case "export":
+		f.StringP("target", "t", "", targetHelp)
+		f.String("file", "", "New output file path; existing files are refused")
+		f.Bool("decompress", false, "Export native dump/image without outer gzip/zstd compression")
+		f.Duration("timeout", 2*time.Hour, "Operation limit; 0 disables timeout")
+	case "history":
+		f.IntP("limit", "n", 50, "Maximum restore records to display")
 	case "verify", "inspect", "delete":
 		f.StringP("target", "t", "", targetHelp)
 		if name == "delete" {
@@ -167,11 +178,16 @@ func (o *options) command(name string) *cobra.Command {
 	return c
 }
 func (o *options) run(c *cobra.Command, name string) error {
+	if name == "restore" {
+		if err := o.selectRestore(c); err != nil {
+			return err
+		}
+	}
 	target, _ := c.Flags().GetString("target")
 	confirm, _ := c.Flags().GetBool("confirm")
 	dry, _ := c.Flags().GetBool("dry-run")
 	switch name {
-	case "restore", "verify", "inspect", "delete":
+	case "restore", "export", "verify", "inspect", "delete":
 		if target == "" {
 			return fmt.Errorf("--target is required; use dbvault list to find a backup name")
 		}
@@ -180,7 +196,7 @@ func (o *options) run(c *cobra.Command, name string) error {
 		return fmt.Errorf("--confirm is required for %s; use --dry-run to preview", name)
 	}
 	limit, _ := c.Flags().GetInt("limit")
-	if name == "list" && limit < 1 {
+	if (name == "list" || name == "history") && limit < 1 {
 		return fmt.Errorf("--limit must be positive")
 	}
 	ctx := c.Context()
@@ -202,6 +218,12 @@ func (o *options) run(c *cobra.Command, name string) error {
 	display.Configure(details, o.redactor)
 	display.Step("configuration")
 	cfg, err := o.load(c)
+	if err == nil && name == "restore" {
+		newDB, _ := c.Flags().GetBool("new-database")
+		if newDB && !c.Flags().Changed("database") {
+			cfg.Database.Database, err = app.NewDestination(cfg.Database.Type, cfg.Database.Database, time.Now())
+		}
+	}
 	details.Config = cfg
 	display.Configure(details, o.redactor)
 	if err != nil {
@@ -251,7 +273,7 @@ func (o *options) run(c *cobra.Command, name string) error {
 	if name != "list" && name != "cleanup" {
 		svc.Observe = display.Observe
 	}
-	if cfg.Notifications.Slack.Enabled {
+	if cfg.Notifications.Slack.Enabled && (name == "backup" || name == "restore") {
 		hook := os.Getenv(cfg.Notifications.Slack.WebhookEnv)
 		if hook == "" {
 			return fmt.Errorf("notifications.slack webhook environment variable is missing")
@@ -295,10 +317,35 @@ func (o *options) run(c *cobra.Command, name string) error {
 		tables, _ := c.Flags().GetStringSlice("table")
 		schemas, _ := c.Flags().GetStringSlice("schema")
 		collections, _ := c.Flags().GetStringSlice("collection")
-		if err := svc.Restore(ctx, key, confirm, dry, database.RestoreOptions{Clean: clean, Tables: tables, Schemas: schemas, Collections: collections}); err != nil {
+		newDB, _ := c.Flags().GetBool("new-database")
+		backupBefore, _ := c.Flags().GetBool("backup-before-restore")
+		m, err := svc.ReadManifest(ctx, key)
+		if err != nil {
 			return err
 		}
-		return o.output(c, "Restore checks passed")
+		display.RestorePreview(m, cfg.Database, newDB, backupBefore, clean, tables, schemas, collections)
+		result, restoreErr := svc.RestoreWithResult(ctx, key, confirm, dry, app.RestoreRequest{NewDatabase: newDB, BackupBefore: backupBefore, Options: database.RestoreOptions{Clean: clean, Tables: tables, Schemas: schemas, Collections: collections}})
+		if result.Backup.ID != "" {
+			return errors.Join(restoreErr, o.output(c, result))
+		}
+		return restoreErr
+	case "export":
+		path, _ := c.Flags().GetString("file")
+		decompress, _ := c.Flags().GetBool("decompress")
+		result, err := svc.Export(ctx, key, path, decompress)
+		if err != nil {
+			return err
+		}
+		return o.output(c, result)
+	case "history":
+		items, err := svc.RestoreHistory(ctx)
+		if err != nil {
+			return err
+		}
+		if len(items) > limit {
+			items = items[:limit]
+		}
+		return o.output(c, items)
 	case "verify":
 		m, err := svc.Verify(ctx, key)
 		if err != nil {
