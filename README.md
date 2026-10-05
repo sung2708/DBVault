@@ -9,7 +9,7 @@
 </div>
 
 [![Go Version](https://img.shields.io/badge/go-1.26%2B-blue.svg)](https://golang.org)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-verified--multi--engine-yellow.svg)](#current-project-status)
 
 ---
@@ -696,4 +696,4 @@ See [docs/roadmap.md](docs/roadmap.md) for implementation milestones and remaini
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
