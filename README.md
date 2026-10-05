@@ -583,7 +583,24 @@ Overlapping jobs are skipped; missed runs are not replayed. See [scheduling](doc
 
 ### Docker Runtime Targets
 
-Build the target containing the native clients needed for your engine:
+Pull a published image from Docker Hub (choose the target matching your database):
+
+```bash
+docker pull sungp2708/dbvault:postgres
+docker run --rm sungp2708/dbvault:postgres --help
+```
+
+Available tags are `postgres`, `mysql`, `mongodb`, and `sqlite`. To build and
+publish an updated image from this repository, log in to Docker Hub and run:
+
+```bash
+docker login
+docker build --target postgres -t sungp2708/dbvault:postgres .
+docker push sungp2708/dbvault:postgres
+```
+
+Replace `postgres` with `mysql`, `mongodb`, or `sqlite` to publish another
+target. Alternatively, build locally without publishing:
 
 ```bash
 docker build --target postgres -t dbvault:postgres .
@@ -596,7 +613,7 @@ docker run --rm dbvault:postgres --help
 Targets run as non-root users. PostgreSQL includes client 16, MySQL includes 8.4
 clients, MongoDB includes its Database Tools, and SQLite needs no client executable.
 Actual backups additionally require mounted configuration/storage, credentials and
-network access to the database. These are local build recipes, not published images.
+network access to the database.
 
 ---
 
