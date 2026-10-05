@@ -20,6 +20,9 @@ docker pull sungp2708/dbvault:postgres
 ```
 
 Replace `postgres` with `mysql`, `mongodb`, or `sqlite` to pull another variant.
+These variant tags track the latest successful release. Version-specific tags
+are also published in the format `vX.Y.Z-postgres`, `vX.Y.Z-mysql`,
+`vX.Y.Z-mongodb`, and `vX.Y.Z-sqlite`.
 
 ## Check the CLI
 
