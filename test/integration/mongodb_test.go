@@ -5,6 +5,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/sung2708/DBVault/internal/app"
 	"github.com/sung2708/DBVault/internal/config"
@@ -26,7 +27,7 @@ import (
 
 type mongoContainerRunner struct{ containerRunner }
 
-func (r mongoContainerRunner) Run(ctx context.Context, s runner.Spec) error {
+func (r mongoContainerRunner) Run(ctx context.Context, s runner.Spec) (runErr error) {
 	args := append([]string(nil), s.Args...)
 	for i, arg := range args {
 		if strings.HasPrefix(arg, "--port=") {
@@ -39,9 +40,11 @@ func (r mongoContainerRunner) Run(ctx context.Context, s runner.Spec) error {
 				return e
 			}
 			defer func() {
-				cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
 				defer cancel()
-				r.native.Run(cleanup, runner.Spec{Executable: "docker", Args: []string{"exec", r.container, "rm", "-f", target}, Stdout: io.Discard})
+				if err := r.native.Run(cleanup, runner.Spec{Executable: "docker", Args: []string{"exec", r.container, "rm", "-f", target}, Stdout: io.Discard}); err != nil {
+					runErr = errors.Join(runErr, fmt.Errorf("remove temporary MongoDB test credentials: %w", err))
+				}
 			}()
 			args[i] = "--config=" + target
 		}
