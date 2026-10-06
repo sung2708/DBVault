@@ -4,6 +4,32 @@ This document details the testing architecture, validation commands, integration
 
 ## Implemented test harness
 
+### v0.6.0 native PITR and independent monitoring
+
+The complete Docker suite requires a Linux binary for the public CLI fixture
+and the matching MySQL tools image. On Linux, run:
+
+```bash
+mkdir -p .tmp-build
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o .tmp-build/dbvault-native-linux ./cmd/dbvault
+docker build -f Dockerfile.mysql-native-tools -t dbvault:native-mysql-tools .
+export DBVAULT_NATIVE_BINARY="$PWD/.tmp-build/dbvault-native-linux"
+go test -v -timeout=45m -tags=integration ./test/integration/...
+DBVAULT_MONITOR_BINARY="$PWD/.tmp-build/dbvault-native-linux" python3 -B -m unittest discover -s scripts -p test_monitor_backups.py -v
+```
+
+Without `DBVAULT_NATIVE_BINARY`, the native PITR fixture is skipped. Native data
+and archives use owned Docker volumes, removed after source/target containers;
+the host temporary directory contains fixture profiles only. This avoids Linux
+runner/container ownership conflicts and Windows bind-mount fsync overhead.
+MongoDB fixture credential cleanup has a bounded deadline and propagates failures;
+the final assertion still checks that no copied credential file remains.
+
+The Python suite includes real CLI checks for fresh, overdue and absent backups,
+storage failure, and native coverage for the correct/wrong source. These tests
+run without a producer or database process. They do not validate an independent
+host deployment or notification delivery; see [independent monitoring](independent-monitoring.md).
+
 Recovery drill tests use real embedded SQLite databases with none/gzip/zstd,
 compare restored fixture values, assert production data and immutable manifests
 stay unchanged, and exercise new-file isolation, hardlinks/symlinks (host privilege
