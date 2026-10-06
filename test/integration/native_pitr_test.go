@@ -113,6 +113,18 @@ func TestNativePITRDocker(t *testing.T) {
 			source := network + "-" + engine
 			target := source + "-target"
 			image := map[string]string{"mysql": "mysql:8.4", "mongodb": "mongo:8.0", "postgres": "postgres:16-bookworm"}[engine]
+			// Keep container-owned archives/data off the host bind mount. Native
+			// tools create private root/postgres-owned directories that a Linux
+			// CI runner cannot traverse during host-side cleanup.
+			volume := source + "-work"
+			must("volume", "create", volume)
+			t.Cleanup(func() {
+				cleanup, c := context.WithTimeout(context.Background(), time.Minute)
+				defer c()
+				if err := native.Run(cleanup, runner.Spec{Executable: "docker", Args: []string{"volume", "rm", volume}, Stdout: io.Discard}); err != nil {
+					t.Error(err)
+				}
+			})
 			for _, name := range []string{source, target} {
 				t.Cleanup(func() {
 					cleanup, c := context.WithTimeout(context.Background(), 30*time.Second)
@@ -125,7 +137,7 @@ func TestNativePITRDocker(t *testing.T) {
 					native.Run(cleanup, runner.Spec{Executable: "docker", Args: []string{"rm", "--force", "--volumes", name}, Stdout: io.Discard})
 				})
 			}
-			mount := work + ":/work"
+			mount := volume + ":/work"
 			baseArgs := []string{"run", "--detach", "--tty", "--name", source, "--network", network, "--volume", mount}
 			switch engine {
 			case "mysql":
@@ -134,7 +146,7 @@ func TestNativePITRDocker(t *testing.T) {
 					baseArgs = append(baseArgs, "--gtid-mode=ON", "--enforce-gtid-consistency=ON")
 				}
 			case "postgres":
-				os.Mkdir(filepath.Join(work, "wal"), 0700)
+				must("run", "--rm", "--volume", mount, "--entrypoint", "sh", image, "-c", "mkdir -p /work/wal && chown postgres:postgres /work /work/wal && chmod 0700 /work /work/wal")
 				baseArgs = append(baseArgs, "--env", "POSTGRES_PASSWORD", image, "-c", "archive_mode=on", "-c", "archive_command=cp %p /work/wal/%f")
 			case "mongodb":
 				baseArgs = append(baseArgs, image, "--replSet", "source", "--bind_ip_all")
@@ -157,7 +169,6 @@ func TestNativePITRDocker(t *testing.T) {
 				return e
 			})
 			if engine == "postgres" {
-				must("exec", source, "chown", "999:999", "/work", "/work/wal")
 				must("exec", source, "sh", "-c", `printf '\nhost replication postgres 0.0.0.0/0 scram-sha-256\n' >> "$PGDATA/pg_hba.conf"`)
 				if _, err := query(source, "SELECT pg_reload_conf()"); err != nil {
 					t.Fatal(err)
@@ -198,6 +209,7 @@ func TestNativePITRDocker(t *testing.T) {
 				if e = os.WriteFile(filepath.Join(work, name), data, 0600); e != nil {
 					t.Fatal(e)
 				}
+				must("cp", filepath.Join(work, name), source+":/work/"+name)
 			}
 			save("source.yaml", cfg)
 			cli := func(args ...string) (string, error) {
