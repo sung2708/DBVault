@@ -138,6 +138,8 @@ func TestCloudProvidersAndSQLiteRestore(t *testing.T) {
 			}
 			cfg.Database = config.Database{Type: "sqlite", Database: path}
 			cfg.Protection = &config.Protection{VerifyAfterBackup: true}
+			cfg.Encryption = integrationEncryption(t)
+			cfg.Metrics.RecordOperations = true
 			adapter := &sqliteadapter.Adapter{Config: cfg.Database}
 			svc := &app.Service{Config: cfg, DB: adapter, Store: provider, Version: "integration"}
 			for _, codec := range []string{"none", "gzip", "zstd"} {
@@ -152,8 +154,13 @@ func TestCloudProvidersAndSQLiteRestore(t *testing.T) {
 					t.Fatal("cloud post-upload verification evidence", verificationHealth, readErr)
 				}
 				assertBackupHealth(t, ctx, svc, m)
+				base := m
 				if codec == "none" {
 					assertCloudRestoreOperations(t, ctx, svc, m)
+					m, e = svc.Backup(ctx, "incremental", false)
+					if e != nil {
+						t.Fatal("cloud encrypted incremental", e)
+					}
 				}
 				drillTarget := filepath.Join(t.TempDir(), "cloud-recovery.sqlite")
 				drill, err := svc.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: drillTarget, Confirm: true, Cleanup: true})
@@ -179,6 +186,11 @@ func TestCloudProvidersAndSQLiteRestore(t *testing.T) {
 				}
 				if e = svc.Delete(ctx, m.Name, true, false); e != nil {
 					t.Fatal(e)
+				}
+				if base.Name != m.Name {
+					if e = svc.Delete(ctx, base.Name, true, false); e != nil {
+						t.Fatal(e)
+					}
 				}
 			}
 		})

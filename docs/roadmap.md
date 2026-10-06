@@ -9,8 +9,11 @@ This document outlines the phased development roadmap for DBVault, based on an a
 The repository implements all four database engines and storage providers,
 Slack, retention and persistent cron schedules. See
 [verified status](implementation-status.md) for executed checks.
-Incremental/differential recovery chains, client-side encryption and live-cloud
-validation remain separate future milestones.
+Version v0.6.0 includes native WAL/binlog/oplog recovery chains, KMS/Vault key
+providers, native scheduling/retention and independent freshness monitoring.
+Differential backups and live-cloud validation remain future milestones. See
+[logical delta chains and encrypted recovery operations](enhancements.md),
+[native PITR](pitr.md) and [independent monitoring](independent-monitoring.md).
 
 ### Recovery operations
 
@@ -22,8 +25,8 @@ validation remain separate future milestones.
 - [x] SQLite recovery-drill CLI (`v0.3.0`) with isolated restore, structural validation,
   owned cleanup and immutable exact-backup health evidence.
 - [x] PostgreSQL recovery drills in new Docker-isolated servers (`v0.4.0`).
-- [ ] MySQL/MongoDB recovery drills with proven server/credential isolation
-  and corresponding real integration evidence.
+- [x] MySQL/MongoDB recovery drills in new isolated Docker servers with fresh
+  credentials, structural validation and real integration coverage.
 
 ### Available in Phase 0:
 - [x] Comprehensive architectural blueprint and pipeline design.
@@ -79,5 +82,10 @@ Phase 1 delivered an end-to-end backup and restore workflow for PostgreSQL to lo
 - [x] **SQLite Adapter:** Consistent snapshots and online backup API restore.
 - [x] **Google Cloud Storage (GCS):** Official SDK resumable uploads and emulator restore drills.
 - [x] **Azure Blob Storage:** Official SDK block blobs and emulator restore drills.
-- [ ] **Client-Side Envelope Encryption:** AES-256-GCM data encryption with AWS KMS / HashiCorp Vault key rotation.
-- [ ] **Prometheus Metrics:** Integrated metrics exporter exposing backup durations, byte sizes, and failure counts.
+- [x] **Client-Side Envelope Encryption:** AES-256-GCM with environment-referenced wrapping keys and key rotation.
+- [x] **Managed key providers:** AWS KMS / HashiCorp Vault Transit envelope encryption.
+- [x] **Native increments and PITR:** PostgreSQL WAL, MySQL binlogs and MongoDB replica-set oplogs through separate `pitr` commands.
+- [x] **Native scheduled capture and retention:** Source-specific parent selection, periodic baselines and verified whole-chain cleanup.
+- [x] **Logical incremental chains:** Dump deltas, dependency verification and retention protections.
+- [x] **Scheduled recovery:** Latest-backup drills with owned target cleanup and evidence.
+- [x] **Prometheus Metrics:** Integrated metrics exporter exposing backup durations, byte sizes, and failure counts.

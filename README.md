@@ -16,6 +16,16 @@
 
 ## Current Project Status
 
+Version `v0.6.0` adds client-side AES-256-GCM encryption with key rotation,
+logical dump incremental chains, MySQL/MongoDB isolated recovery drills,
+Prometheus metrics and scheduled recovery jobs. It also adds native WAL/binlog/oplog
+capture and PITR, plus AWS KMS/Vault Transit key providers. See
+[configuration and usage](docs/enhancements.md), [native PITR](docs/pitr.md) and
+[managed keys](docs/managed-keys.md).
+It includes native scheduling/retention and independent storage-only freshness
+monitoring, including PITR coverage. See [independent monitoring](docs/independent-monitoring.md).
+Release assets become available after the tag-triggered release workflow succeeds.
+
 ### Start here
 
 Download the executable for your platform from [GitHub Releases](https://github.com/sung2708/DBVault/releases)
@@ -35,10 +45,10 @@ running `doctor`. Configure `health.max_backup_age` and enable
 `protection.verify_after_backup` for recorded integrity checks. For recovery testing,
 see [recovery drills](docs/cli-reference.md#dbvault-recovery-drill).
 
-Release `v0.5.0` adds restore workflows, history, exports and clearer CLI results.
+Release `v0.6.0` includes the earlier restore workflows, history and exports.
 Downloads and versioned GHCR images become available after the release workflow
 succeeds. Install this release with
-`go install github.com/sung2708/DBVault/cmd/dbvault@v0.5.0`.
+`go install github.com/sung2708/DBVault/cmd/dbvault@v0.6.0`.
 See the [changelog](CHANGELOG.md).
 
 Restore can create a destination
@@ -52,7 +62,9 @@ a terminal; JSON and automation remain flag-driven. See [restore workflows](docs
 >
 > Throughout this documentation:
 > - **Implemented**: Four adapters, four storage providers, none/gzip/zstd, SHA-256, metadata, verification, retention, destructive-operation guards, Slack and persistent cron schedules.
-> - **Unsupported**: Incremental/differential recovery chains and client-side encryption. Cloud IAM/KMS and actual webhook delivery require operator validation; emulator tests cover the storage workflows.
+> - **Native operations**: `pitr base/capture/restore` provides instance-wide baselines and incremental WAL/binlog/oplog ranges. PostgreSQL restore prepares an offline directory; startup and target-reached validation are explicit operator steps. Native engine prerequisites and restrictions are documented separately.
+> - **Native automation**: `schedule add --operation pitr` supports log capture, baseline refresh and whole-chain retention. See [native operations](docs/pitr.md).
+> - **Unsupported**: Differential backups and cross-timeline PostgreSQL recovery. Live cloud IAM/KMS and actual webhook delivery require operator validation.
 
 ---
 
@@ -102,7 +114,11 @@ Key architectural tenets:
 | **Guided configuration setup** | Implemented | `dbvault init` creates validated configuration interactively or with automation flags |
 | **Readiness diagnostics** | Implemented | `dbvault doctor` checks configuration, authenticated database/tool compatibility, storage access and temporary directory without creating backups or sending Slack messages |
 | **Protection overview** | Implemented | `dbvault status` summarizes existing backup health, metadata, recovery evidence, storage and saved schedules without hashing archives or running a drill |
-| **Recovery drill** | SQLite and PostgreSQL | New SQLite file or new Docker-isolated PostgreSQL server, validation and separate evidence; MySQL/MongoDB fail closed |
+| **Recovery drill** | All four engines | New SQLite file or new Docker-isolated PostgreSQL/MySQL/MongoDB server with structural validation and separate evidence |
+| **Client-side encryption** | Implemented | AES-256-GCM envelope encryption, key IDs and environment-referenced key rotation |
+| **Logical incremental backup** | Implemented | Verified dump delta chains for all engines; full database scan remains required |
+| **Prometheus metrics** | Implemented | Text output, `/metrics` endpoint and optional durable operation counters |
+| **Scheduled recovery** | Implemented | Recurring isolated latest-backup drills with new destinations, evidence and notifications |
 | **Update checks** | Implemented | `dbvault update check` compares the installed build with official stable releases and provides install instructions |
 | **PostgreSQL Adapter** | Implemented | Custom archive streaming via pg_dump; restore via pg_restore |
 | **MySQL Adapter** | Implemented | Oracle MySQL 8.x/InnoDB logical dumps; full SQL restore |
@@ -133,11 +149,12 @@ The following capability matrix reflects the verified implementation status acro
 | **Connection Test** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
 | **Full Backup** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
 | **Full Restore** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
-| **Safe Recovery Drill CLI** | SUPPORTED (v0.4.0; Docker) | UNSUPPORTED | UNSUPPORTED | SUPPORTED |
+| **Safe Recovery Drill CLI** | SUPPORTED (Docker) | SUPPORTED (Docker) | SUPPORTED (Docker) | SUPPORTED |
+| **Logical Dump Delta Chains** | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
 | **Selective Backup** | SUPPORTED | SUPPORTED | PARTIAL | UNSUPPORTED |
 | **Selective Restore** | SUPPORTED | UNSUPPORTED | SUPPORTED | UNSUPPORTED |
 | **Streaming Pipeline** | SUPPORTED | SUPPORTED | SUPPORTED | PARTIAL |
-| **Incremental Backup** | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED |
+| **Native Incremental Backup (`pitr`)** | WAL | Binlog | Replica-set oplog | UNSUPPORTED |
 | **Differential Backup** | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED |
 | **Required Native Tool(s)** | `pg_dump`, `pg_restore`, `psql` | `mysqldump`, `mysql` | `mongodump`, `mongorestore` | None; embedded SQLite |
 
@@ -148,7 +165,7 @@ drills exercise PostgreSQL/MySQL/MongoDB. See the full
 [acceptance matrix](docs/implementation-status.md).
 
 > [!NOTE]
-> Database incremental and differential backups require database-specific write-ahead log (WAL/binlog/oplog) archiving and cannot be handled generically across database engines. Initial releases focus on robust full logical backups.
+> Use `pitr base` and `pitr capture` for engine-specific WAL/binlog/oplog ranges without another database dump. `backup --type incremental` retains the separate logical delta behavior, which still requires a full scan. See [native PITR](docs/pitr.md).
 
 ---
 
@@ -451,8 +468,7 @@ docker pull postgres:16-bookworm # match the backup's source major
 dbvault recovery drill --target ACTUAL-BACKUP-NAME --recovery-database recovery_check --confirm --cleanup
 ```
 
-MySQL/MongoDB drills remain unsupported and fail
-before database writes. See [recovery drill](docs/cli-reference.md#dbvault-recovery-drill).
+MySQL/MongoDB use new isolated Docker targets with matching preloaded official images. See [recovery drill](docs/cli-reference.md#dbvault-recovery-drill).
 
 DBVault separates configuration structure from secret storage. **Never place cleartext passwords in configuration files.**
 
@@ -543,7 +559,7 @@ health:
   max_backup_age: 12h
 ```
 
-`dbvault health` checks the latest registered backup for that database without
+In the default logical scope, `dbvault health` checks the latest registered backup without
 reading archive contents. Fresh backups report warning when checksum verification
 history is unknown; `dbvault health --verify` actively checks the latest archive
 and records the result. `dbvault verify` and optional
@@ -553,6 +569,13 @@ bandwidth and egress costs. Stale or missing backups are critical; missing
 freshness policy is unknown. Verification is not a recovery drill.
 Exit 0 means healthy; warning/critical/unknown return 1. Use `--output json` for
 automation and `--quiet` for plain results. See [health semantics](docs/cli-reference.md#dbvault-health).
+
+To catch missed backups when the producer host is powered off, run checks on an
+independent host against shared storage. See [independent monitoring](docs/independent-monitoring.md)
+for the read-only [monitor profile](configs/monitor-s3.yaml), runnable freshness
+probe and missing-probe alerts. Enabled schedule definitions do not prove
+scheduler liveness. Native PITR coverage uses `health.backup_scope: pitr` with an
+explicit `health.source_identity`; logical checks remain the default.
 
 ```bash
 dbvault list --limit 10
@@ -673,6 +696,7 @@ Explore the complete technical documentation:
 | [CLI Reference](docs/cli-reference.md) | Complete reference for all CLI commands, arguments, and flags |
 | [Backup Guide](docs/backup.md) | Deep dive into the backup lifecycle, pipeline streaming, and checksumming |
 | [Restore Guide](docs/restore.md) | Restore procedures, pre-flight safety checks, and recovery drills |
+| [Encryption, increments and recovery](docs/enhancements.md) | New features, key rotation, dependency safety, metrics and recurring drills |
 | [Database Adapters](docs/databases.md) | Capabilities, flags, and caveats for PostgreSQL, MySQL, MongoDB, and SQLite |
 | [Storage Providers](docs/storage.md) | Local filesystem and official S3/GCS/Azure SDK providers |
 | [Security Model](docs/security.md) | Threat model, secret handling, shell injection prevention, and integrity |
@@ -690,7 +714,7 @@ Explore the complete technical documentation:
 ## Roadmap Summary
 
 - **Implemented:** Four engines/providers, compression, integrity, retention, Slack and persistent cron schedules, with database and emulator restore drills.
-- **Future work:** Engine-specific physical recovery chains, client-side encryption and metrics; live-cloud deployment validation.
+- **Future work:** Native retention/scheduling, cross-timeline physical recovery and live-cloud deployment validation.
 - **Release tooling:** Docker packaging, CI and release workflows build cross-platform binaries and checksums.
 - **Release work:** Publish reviewed tags/images after live operational validation.
 

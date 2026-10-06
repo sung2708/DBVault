@@ -9,6 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-10-06
+
+### Added
+- Independent storage-only monitoring guide, read-only monitor profile and a
+  freshness probe with JSON/exit codes and missing-probe deployment guidance.
+- Native PITR health scope with explicit source identity, chain availability and
+  optional read-only stored-byte verification; JSON reports on runtime health
+  initialization failures and explicit `--state ""` for independent monitors.
+- Native scheduler jobs (`--operation pitr`), automatic source-specific parent
+  selection, optional baseline refresh, and verified whole-chain retention via
+  `pitr cleanup` or post-backup `--cleanup`, with a shared storage lock.
+- `pitr base/capture/list/restore`: instance-wide native baselines, incremental
+  WAL/binlog/oplog ranges with pinned source identity and continuity checks,
+  exclusive timestamp replay and fresh-target guards. PostgreSQL prepares an
+  offline recovery directory; MySQL/MongoDB replay through native tools.
+- AWS KMS and Vault Transit wrapping-key providers, authenticated v2 envelopes,
+  previous v1 compatibility and remote key rotation support.
+- MySQL and MongoDB recovery drills in newly created network-isolated Docker
+  servers with fresh credentials, matching preloaded official images, structural
+  validation, stopped failure targets and exact-backup recovery evidence.
+- Optional client-side AES-256-GCM envelope encryption with authenticated stream
+  termination, archive context binding, environment-referenced wrapping key IDs,
+  key rotation and `encryption keygen` private key-file generation.
+- `backup --type incremental` stores logical dump deltas for all engines,
+  verified base identity and reconstructed SHA-256, with a 32-link limit,
+  dependency-aware health/retention/deletion and a cross-process storage lock.
+- `recovery drill --latest` and saved `schedule add --operation recovery` jobs
+  with recurring authorization, unique destinations, success-only cleanup and
+  configured recovery notifications. Backup schedules accept `--type incremental`.
+- Prometheus `metrics` text output and optional `/metrics` HTTP endpoint,
+  with opt-in durable operation outcomes, durations and stored-byte counters.
+
+### Changed
+- Project licensing is now Apache-2.0; release images also publish to Docker Hub.
+- Restore authenticates and materializes the entire archive/dependency chain
+  before preparing a destination. `export --decompress` produces a standalone
+  decrypted/reconstructed native dump or SQLite image.
+- Doctor checks the active encryption key; backup/inspect show encryption and
+  base dependency details; schedule listings distinguish backup/recovery jobs.
+
+Logical increments still scan the complete database. Native `pitr capture`
+reads engine logs instead. Native jobs and whole-chain retention are available;
+differential backups remain unsupported. See [operator instructions](docs/enhancements.md),
+[native PITR](docs/pitr.md) and [managed keys](docs/managed-keys.md).
+
 ## [v0.5.0] - 2026-10-02
 
 ### Added

@@ -1,5 +1,8 @@
 # Backup Operations & Pipeline Architecture
 
+For client-side encryption, logical incremental chains, all-engine isolated
+recovery drills, metrics and recurring recovery jobs, see [operator instructions](enhancements.md).
+
 This document details the internal lifecycle, streaming pipeline, data integrity mechanisms, and operational best practices for executing backups with DBVault.
 
 ## Implemented contract
@@ -10,10 +13,10 @@ database against optional `health.max_backup_age`. Freshness uses `created_at`
 older backups are stale. Missing artifacts remain critical even when an older
 backup exists. Archives without valid completed sidecars are not registered backups.
 Default health reads metadata and checks existence/listed size; it does not hash
-archives. `health --verify` actively verifies the latest matching artifact only.
+archives. `health --verify` actively verifies the latest matching artifact and its incremental ancestors.
 `verify` and configured `protection.verify_after_backup` append immutable
 stored-artifact verification records, so health/status can distinguish verified,
-failed and unknown evidence for the exact latest backup. `recovery drill` provides separate evidence for SQLite through actual
+failed and unknown evidence for the exact latest backup. `recovery drill` provides separate evidence for all four engines through actual
 isolated restore and structural validation; health associates records with the
 exact selected backup ID/name/hash. Healthy backup does not mean a recovery drill
 has passed. See [health](cli-reference.md#dbvault-health) and

@@ -12,6 +12,7 @@ import (
 	"github.com/sung2708/DBVault/internal/doctor"
 	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/onboarding"
+	"github.com/sung2708/DBVault/internal/pitr"
 	"github.com/sung2708/DBVault/internal/schedule"
 	"github.com/sung2708/DBVault/internal/update"
 )
@@ -24,6 +25,31 @@ func (r *Renderer) Result(operation string, value any) error {
 	}
 	var b strings.Builder
 	switch v := value.(type) {
+	case pitr.Record:
+		r.title(&b, "success", "Native backup published")
+		r.field(&b, "Archive", v.Name)
+		r.field(&b, "Engine", v.Engine)
+		r.field(&b, "Kind", v.Kind)
+		r.field(&b, "Parent", v.Parent)
+		r.field(&b, "Cursor", v.End)
+		r.field(&b, "Coverage", v.From.UTC().Format(time.RFC3339Nano)+" to "+v.Until.UTC().Format(time.RFC3339Nano))
+		r.field(&b, "Stored size", FormatBytes(v.Size))
+	case []pitr.Record:
+		r.title(&b, "header", "Native PITR archives")
+		rows := make([][]string, 0, len(v))
+		for _, m := range v {
+			rows = append(rows, []string{m.Name, m.Engine, m.Kind, m.Until.UTC().Format(time.RFC3339Nano), m.Parent})
+		}
+		r.table(&b, []string{"Archive", "Engine", "Kind", "Coverage until", "Parent"}, rows)
+	case pitr.RestoreResult:
+		r.title(&b, "header", "Native PITR result")
+		r.field(&b, "Engine", v.Engine)
+		r.field(&b, "State", v.State)
+		r.field(&b, "Target time", v.TargetTime.UTC().Format(time.RFC3339)+" (exclusive)")
+		r.field(&b, "Directory", v.Directory)
+		if v.State == "prepared_requires_server_start" {
+			r.hint(&b, "Start an isolated PostgreSQL server with this directory, then verify that WAL replay reached and paused at the target.")
+		}
 	case app.RestoreResult:
 		if r.options.Quiet {
 			fmt.Fprintf(&b, "%s\t%s\n", r.safe(v.Status), r.safe(v.Database))
@@ -103,6 +129,13 @@ func (r *Renderer) Result(operation string, value any) error {
 			r.field(&b, "Backup ID", v.BackupID)
 			r.field(&b, "Backup", v.Manifest.Name)
 			r.field(&b, "Type", Engine(v.Manifest.Database.Engine))
+			r.field(&b, "Backup type", v.Manifest.BackupType)
+			if v.Manifest.Encryption != nil {
+				r.field(&b, "Encryption", "AES-256-GCM / "+v.Manifest.Encryption.KeyID)
+			}
+			if v.Manifest.Delta != nil {
+				r.field(&b, "Base backup", v.Manifest.Delta.BaseName)
+			}
 			r.field(&b, "Compression", v.Manifest.Pipeline.Compression)
 			r.field(&b, "Stored size", FormatBytes(v.Manifest.Pipeline.Stored))
 			r.field(&b, "Storage", v.Manifest.Storage)
@@ -449,9 +482,13 @@ func (r *Renderer) Result(operation string, value any) error {
 				if job.Enabled {
 					state = "enabled"
 				}
-				rows = append(rows, []string{job.ID, state, job.Cron, job.Config})
+				op := job.Operation
+				if op == "" {
+					op = "backup"
+				}
+				rows = append(rows, []string{job.ID, state, op, job.Cron, job.Config})
 			}
-			r.table(&b, []string{"ID", "STATE", "CRON", "CONFIG"}, rows)
+			r.table(&b, []string{"ID", "STATE", "OPERATION", "CRON", "CONFIG"}, rows)
 			r.hint(&b, "Run enabled jobs with: dbvault schedule (foreground; restart after edits).")
 		}
 	case map[string]string:
@@ -543,6 +580,13 @@ func (r *Renderer) updateResult(b *strings.Builder, v update.Result) {
 }
 
 func (r *Renderer) backupFields(b *strings.Builder, m metadata.Manifest, full bool) {
+	if m.Encryption != nil {
+		r.field(b, "Encryption", "AES-256-GCM / "+m.Encryption.KeyID)
+	}
+	if m.Delta != nil {
+		r.field(b, "Base backup", m.Delta.BaseName)
+		r.field(b, "Chain depth", fmt.Sprint(m.Delta.Depth))
+	}
 	for _, f := range [][2]string{{"Backup name", m.Name}, {"Backup ID", m.ID}, {"Database", m.Database.Name}, {"Engine", Engine(m.Database.Engine)}, {"Type", m.BackupType}, {"Compression", m.Pipeline.Compression}, {"Stored size", FormatBytes(m.Pipeline.Stored)}, {"Storage", m.Storage}, {"Checksum", FormatChecksum(m.Checksum.Hash, full)}, {"Duration", FormatDuration(time.Duration(m.Duration * float64(time.Second)))}, {"Created", FormatTime(m.CreatedAt)}} {
 		r.field(b, f[0], f[1])
 	}

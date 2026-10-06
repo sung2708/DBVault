@@ -12,7 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sung2708/DBVault/internal/doctor"
+	"github.com/sung2708/DBVault/internal/encryption"
 	"github.com/sung2708/DBVault/internal/fault"
+	"github.com/sung2708/DBVault/internal/keymanager"
 	"github.com/sung2708/DBVault/internal/storage/providers"
 	"github.com/sung2708/DBVault/internal/toolresolve"
 )
@@ -50,6 +52,19 @@ func (o *options) runDoctor(c *cobra.Command, timeout time.Duration) error {
 		add("storage", "storage", doctor.Skip, "Storage check skipped", "Configuration is not valid", "")
 	} else {
 		add("configuration", "configuration", doctor.Pass, "Configuration is valid", "Schema and supported option values passed validation", "")
+		if cfg.Encryption != nil {
+			var keyErr error
+			if cfg.Encryption.Providers[cfg.Encryption.KeyID].Type != "" {
+				_, keyErr = keymanager.Resolve(ctx, cfg.Encryption, cfg.Encryption.KeyID)
+			} else {
+				_, keyErr = encryption.Key(cfg.Encryption.Keys[cfg.Encryption.KeyID])
+			}
+			if keyErr != nil {
+				add("encryption", "encryption", doctor.Fail, "Active backup encryption key is unavailable", keyErr.Error(), "Load the base64 32-byte key into the configured environment variable.")
+			} else {
+				add("encryption", "encryption", doctor.Pass, "Active backup encryption provider is configured", "Keep previous key IDs available. Remote wrapping permissions are checked during backup and restore.", "")
+			}
+		}
 		password, passErr := cfg.Password()
 		if passErr != nil {
 			add("database", "database", doctor.Fail, "Database credentials are unavailable", "The configured password environment variable is unset or empty", "Set the environment variable named in database.password_env.")

@@ -90,6 +90,7 @@ errors; status evidence such as stale/no backup is reported in the result.
 ```text
 dbvault health [--verify] [--timeout 30s] [--state .dbvault-schedules.json]
 dbvault health --output json
+dbvault health --config monitor.yaml --state "" --output json
 dbvault health --no-color
 dbvault health --quiet
 ```
@@ -153,6 +154,16 @@ absolute path. Matching IDs, cron expressions and enabled state are advisory.
 No matching definition is not evidence that external scheduling is absent.
 Saved enabled schedules do not prove the foreground daemon is running; missed
 runs are not replayed. Health does not calculate next-run time or infer cadence.
+`--state ""` skips schedule inspection for an independent storage monitor.
+
+`health.backup_scope: pitr` with `health.source_identity` checks native archived
+coverage for an explicit source. It validates every parent and chain artifact;
+`last_backup_at` measures native `until`. Default integrity is unknown (warning
+when fresh). `--verify` reads/hashes the entire stored native chain without keys
+or evidence writes. Logical scope and its existing verification records remain
+the default. See [independent monitoring](independent-monitoring.md) for deployment
+and a freshness-only adapter that accepts unknown integrity without claiming it
+passed verification.
 
 Exit 0 means healthy. Completed warning/critical/unknown checks return 1 and
 already include their reason in stdout, without a duplicate stderr diagnostic.
@@ -160,8 +171,14 @@ Configuration/storage check failures use existing error handling (normally 1);
 invalid/unreadable manifests and active verification failures preserve the existing
 integrity exit code 4; cancellation/deadline returns 5. JSON results are one pure
 stdout object (`status`, `databases`); operational errors additionally use JSON
-stderr diagnostics. Missing evidence fields are omitted instead of fabricated:
-timestamps/age, policy/stale flag, artifact existence and backup identity/size.
+stderr diagnostics with bounded reasons rather than raw provider/config values.
+Runtime configuration, schedule-state and storage initialization failures now
+also emit a stdout report with `status: unknown` and a fixed `reason`; configuration
+failure has an empty `databases` array. Flag/usage errors can still have no stdout
+report, and output-write failure cannot guarantee one. Consumers must alert on
+missing/malformed JSON and timeout as well as nonzero exits.
+Missing evidence fields are omitted instead of fabricated: timestamps/age,
+policy/stale flag, artifact existence and backup identity/size.
 Quiet retains result data/errors and suppresses decoration/hints, consistent
 with the other commands. Non-TTY, `--no-color` and `NO_COLOR` suppress ANSI output.
 
@@ -174,8 +191,9 @@ dbvault recovery drill --target BACKUP-NAME --recovery-database NEW-SQLITE-PATH 
 ```
 
 SQLite support shipped in `v0.3.0`. Release `v0.4.0` also supports **PostgreSQL in a
-new Docker-isolated server**. MySQL/MongoDB return an unsupported
-error before contacting the database or creating a recovery target. No force
+new Docker-isolated server**. The current checkout also supports isolated
+MySQL/MongoDB targets using preloaded matching official images; see
+[encrypted and scheduled recovery operations](enhancements.md). No force
 bypass, existing-server target or arbitrary validation hook is provided.
 
 ### PostgreSQL (`v0.4.0`)
@@ -219,7 +237,7 @@ No local native tools or Docker-socket mounts in backup images are required.
 `--target` follows existing restore resolution: backup name from `list`, not its
 manifest ID; local paths must resolve inside storage. `--recovery-database` is a
 new SQLite file in an already existing operator-controlled private directory.
-Both flags are required. Configured production and manifest source paths are
+Specify `--target` or `--latest`, plus `--recovery-database`. Configured production and manifest source paths are
 normalized (including parent links, Windows case and existing file aliases).
 Ambiguous paths, the same destination, any existing target or `-wal`/`-shm`/
 `-journal` sidecar fail closed. Even an empty pre-existing recovery file is refused.
@@ -387,7 +405,7 @@ dbvault backup [flags]
 | `--compression` | | string | Configuration | Override with `none`, `gzip`, or `zstd`. |
 | `--dry-run` | | boolean | `false` | Validate environment, flags, and connectivity without creating a dump. |
 | `--timeout` | | duration | `2h` | Execution timeout (e.g., `30m`, `2h`, `4h`). |
-| `--type` | | string | `full` | Incremental/differential are explicitly unsupported. |
+| `--type` | | string | `full` | `full` or logical dump `incremental`; use `--operation pitr` for native log chains. Differential remains unsupported. |
 
 Set `--timeout 0` to disable the operation deadline. An omitted `--compression`
 uses configuration; help does not advertise a fixed CLI default. Backup dry-run
@@ -603,3 +621,18 @@ persists a definition. `schedule list`, `remove --id`, `enable --id` and
 `disable --id` manage definitions. Restart the daemon to load changes. Default
 timezone is UTC; `CRON_TZ=Asia/Bangkok 0 2 * * *` selects a timezone. Overlapping
 jobs are skipped; missed runs are not replayed. SIGINT/SIGTERM cancels work.
+
+### Native log schedules and cleanup
+
+`schedule add --operation pitr --type incremental` saves a native log backup
+job. Add `--base-every 24h` for periodic baseline refresh and `--cleanup` to
+expire whole native chains after a successful backup. The same pipeline is
+available manually through `pitr backup`. A separate `--type full` job can place
+baseline refresh in a maintenance window. MongoDB full baselines require paused
+writers; see [native prerequisites](pitr.md).
+
+`pitr cleanup --dry-run` previews whole-chain deletion using `retention.keep_count`
+and `keep_days`; `pitr cleanup` executes it. Counts apply to independent baseline
+chains, with the newest baseline and all its log branches protected. Archives
+are verified before deletion. Logical `cleanup` continues to manage logical
+backups only.

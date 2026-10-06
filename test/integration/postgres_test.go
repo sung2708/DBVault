@@ -145,6 +145,7 @@ func TestPostgresBackupDestroyRestore(t *testing.T) {
 			}
 			assertBackupHealth(t, ctx, s, m)
 			if kind == "none" {
+				m = assertServerRecoveryUpgrade(t, ctx, s, m)
 				assertNewRestoreWorkflow(t, ctx, s, m)
 			}
 			dry, err := s.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: "dbvault_recovery", DryRun: true})
@@ -199,6 +200,7 @@ func TestPostgresBackupDestroyRestore(t *testing.T) {
 				t.Fatal(health, err)
 			}
 			cliConfig := cfg
+			cliConfig.Encryption = s.Config.Encryption
 			cliConfig.Database.Host = "unreachable.invalid" // Drill must not contact production.
 			cliConfig.Database.PasswordEnv = "DBVAULT_UNUSED_PRODUCTION_PASSWORD"
 			cliConfig.Storage.Type = "local"

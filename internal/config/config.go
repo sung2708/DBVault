@@ -77,7 +77,9 @@ type Retention struct {
 	KeepCount int `yaml:"keep_count"`
 }
 type Health struct {
-	MaxBackupAge string `yaml:"max_backup_age,omitempty"`
+	MaxBackupAge   string `yaml:"max_backup_age,omitempty"`
+	BackupScope    string `yaml:"backup_scope,omitempty"`
+	SourceIdentity string `yaml:"source_identity,omitempty"`
 }
 type Protection struct {
 	VerifyAfterBackup bool `yaml:"verify_after_backup,omitempty"`
@@ -87,7 +89,28 @@ type Slack struct {
 	WebhookEnv string `yaml:"webhook_url_env"`
 	Channel    string `yaml:"channel"`
 }
+type Encryption struct {
+	KeyID     string                `yaml:"key_id"`
+	Keys      map[string]string     `yaml:"keys"`
+	Providers map[string]ManagedKey `yaml:"providers,omitempty"`
+}
+
+type ManagedKey struct {
+	Type      string `yaml:"type"`
+	Key       string `yaml:"key"`
+	Region    string `yaml:"region,omitempty"`
+	Endpoint  string `yaml:"endpoint,omitempty"`
+	TokenEnv  string `yaml:"token_env,omitempty"`
+	Namespace string `yaml:"namespace,omitempty"`
+	Mount     string `yaml:"mount,omitempty"`
+}
+
 type Config struct {
+	PITR    *PITR `yaml:"pitr,omitempty"`
+	Metrics struct {
+		RecordOperations bool `yaml:"record_operations"`
+	} `yaml:"metrics,omitempty"`
+	Encryption    *Encryption `yaml:"encryption,omitempty"`
 	Version       string      `yaml:"version"`
 	Database      Database    `yaml:"database"`
 	Storage       Storage     `yaml:"storage"`
@@ -98,6 +121,11 @@ type Config struct {
 	Notifications struct {
 		Slack Slack `yaml:"slack"`
 	} `yaml:"notifications"`
+}
+
+type PITR struct {
+	ArchiveDirectory string `yaml:"archive_directory,omitempty"`
+	Quiesced         bool   `yaml:"quiesced,omitempty"`
 }
 type Overrides struct {
 	Database, OutputDir, Compression *string
@@ -184,11 +212,42 @@ func invalid(field, reason string) error {
 	return fault.Wrap(fault.Configuration, field, fmt.Errorf("%s", reason))
 }
 func (c Config) Validate() error {
+	if c.Encryption != nil {
+		if c.Encryption.KeyID == "" || (c.Encryption.Keys[c.Encryption.KeyID] == "" && c.Encryption.Providers[c.Encryption.KeyID].Type == "") {
+			return invalid("encryption", "key_id must reference keys or providers")
+		}
+		for id, env := range c.Encryption.Keys {
+			if id == "" || env == "" || len(id) > 128 {
+				return invalid("encryption.keys", "key IDs and environment names must be nonempty")
+			}
+		}
+		for id, p := range c.Encryption.Providers {
+			if id == "" || len(id) > 128 || c.Encryption.Keys[id] != "" || p.Key == "" || (p.Type != "aws-kms" && p.Type != "vault-transit") {
+				return invalid("encryption.providers", "require unique IDs, a key and type aws-kms or vault-transit")
+			}
+			if p.Type == "vault-transit" && (p.Endpoint == "" || p.TokenEnv == "") {
+				return invalid("encryption.providers", "Vault requires endpoint and token_env")
+			}
+		}
+	}
 	if c.Health.MaxBackupAge != "" {
 		age, err := time.ParseDuration(c.Health.MaxBackupAge)
 		if err != nil || age <= 0 {
 			return invalid("health.max_backup_age", "must be a positive duration such as 12h or 168h")
 		}
+	}
+	if c.Health.BackupScope != "" && c.Health.BackupScope != "logical" && c.Health.BackupScope != "pitr" {
+		return invalid("health.backup_scope", "must be logical or pitr")
+	}
+	if c.Health.BackupScope == "pitr" {
+		if c.Database.Type == "sqlite" {
+			return invalid("health.backup_scope", "pitr does not support SQLite")
+		}
+		if c.Health.SourceIdentity == "" || len(c.Health.SourceIdentity) > 512 || strings.ContainsAny(c.Health.SourceIdentity, "\x00\r\n") {
+			return invalid("health.source_identity", "required bounded native source identity for pitr")
+		}
+	} else if c.Health.SourceIdentity != "" {
+		return invalid("health.source_identity", "requires health.backup_scope: pitr")
 	}
 	if c.Version != "1" {
 		return invalid("version", "must be \"1\"")
@@ -232,9 +291,9 @@ func (c Config) Validate() error {
 		allowed := map[string]bool{}
 		switch c.Database.Type {
 		case "postgres":
-			allowed = map[string]bool{"pg_dump": true, "pg_restore": true, "psql": true}
+			allowed = map[string]bool{"pg_dump": true, "pg_restore": true, "psql": true, "pg_basebackup": true}
 		case "mysql":
-			allowed = map[string]bool{"mysqldump": true, "mysql": true}
+			allowed = map[string]bool{"mysqldump": true, "mysql": true, "mysqlbinlog": true}
 		case "mongodb":
 			allowed = map[string]bool{"mongodump": true, "mongorestore": true}
 		}

@@ -28,6 +28,18 @@ func TestHealthPolicy(t *testing.T) {
 	}
 }
 
+func TestHealthBackupScope(t *testing.T) {
+	for _, tc := range []struct {
+		scope, identity string
+		valid           bool
+	}{{"", "", true}, {"logical", "", true}, {"pitr", "source-uuid", true}, {"pitr", "", false}, {"logical", "source", false}, {"other", "", false}} {
+		_, err := Load(write(t, example+"health:\n  backup_scope: '"+tc.scope+"'\n  source_identity: '"+tc.identity+"'\n"), Overrides{})
+		if (err == nil) != tc.valid {
+			t.Fatal(tc, err)
+		}
+	}
+}
+
 func TestVerifyAfterBackupPolicy(t *testing.T) {
 	for _, value := range []string{"true", "false"} {
 		c, err := Load(write(t, example+"protection:\n  verify_after_backup: "+value+"\n"), Overrides{})

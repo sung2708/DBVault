@@ -11,20 +11,22 @@ import (
 	"github.com/sung2708/DBVault/internal/app"
 	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/metadata"
+	"github.com/sung2708/DBVault/internal/notify"
 	"github.com/sung2708/DBVault/internal/presentation"
 	"github.com/sung2708/DBVault/internal/storage/providers"
 )
 
 func (o *options) recoveryCommand() *cobra.Command {
-	root := &cobra.Command{Use: "recovery", GroupID: "operations", Short: "Run controlled recovery tests in isolated targets", Long: "Recovery drills perform a real isolated restore followed by built-in validation.\nSQLite uses a NEW file; PostgreSQL uses a newly created network-isolated Docker\nserver with fresh credentials. MySQL and MongoDB fail closed.", Args: noPositionalArgs, Example: "  dbvault recovery drill --help"}
+	root := &cobra.Command{Use: "recovery", GroupID: "operations", Short: "Run controlled recovery tests in isolated targets", Long: "Recovery drills perform a real isolated restore followed by built-in validation.\nSQLite uses a NEW file; PostgreSQL uses a newly created network-isolated Docker\nserver with fresh credentials. MySQL and MongoDB also use newly created isolated Docker servers.", Args: noPositionalArgs, Example: "  dbvault recovery drill --help"}
 	var drill app.DrillOptions
 	var timeout time.Duration
-	c := &cobra.Command{Use: "drill --target <backup-name> --recovery-database <new-target>", Short: "Restore a SQLite or PostgreSQL backup into an isolated target",
-		Long:    "Restore the backup name returned by list into a NEW SQLite file or a NEW\nPostgreSQL Docker server. SQLite requires an existing private parent directory;\nexisting targets, links, source aliases and sidecars are refused. PostgreSQL\nrequires Docker and a preloaded postgres:<source-major>-bookworm image. It uses\nno external network, published ports, host binds or source credentials.\n\n--confirm authorizes creating and restoring the isolated target. --dry-run\nverifies/preflights without creating it and is not successful recovery evidence;\nPostgreSQL dry-run checks the image only, not a live server. Targets are preserved\nby default and on failure/cancellation. --cleanup removes only this run's target\nand its anonymous Docker volumes after successful validation and ownership checks.\nResults are saved as separate .recovery.json objects in backup storage.\nMySQL and MongoDB fail before target mutation.",
+	var latest bool
+	c := &cobra.Command{Use: "drill --target <backup-name> --recovery-database <new-target>", Short: "Restore a backup into an isolated target",
+		Long:    "Restore the backup name returned by list into a NEW SQLite file or a NEW\nPostgreSQL Docker server. SQLite requires an existing private parent directory;\nexisting targets, links, source aliases and sidecars are refused. PostgreSQL\nrequires Docker and a preloaded postgres:<source-major>-bookworm image. It uses\nno external network, published ports, host binds or source credentials.\n\n--confirm authorizes creating and restoring the isolated target. --dry-run\nverifies/preflights without creating it and is not successful recovery evidence;\nPostgreSQL dry-run checks the image only, not a live server. Targets are preserved\nby default and on failure/cancellation. --cleanup removes only this run's target\nand its anonymous Docker volumes after successful validation and ownership checks.\nResults are saved as separate .recovery.json objects in backup storage.\nMySQL requires mysql:<source-series>; MongoDB requires mongo:<source-major.minor>.",
 		Example: "  dbvault recovery drill --target backup.sqlite.gz --recovery-database ./recovery/new.sqlite --dry-run\n  dbvault recovery drill --target backup.sqlite.gz --recovery-database ./recovery/new.sqlite --confirm\n  dbvault recovery drill --target backup.sqlite.gz --recovery-database ./recovery/another.sqlite --confirm --cleanup --output json",
 		Args:    noPositionalArgs, PreRunE: func(*cobra.Command, []string) error {
-			if drill.Target == "" || drill.RecoveryDatabase == "" {
-				return fmt.Errorf("--target and --recovery-database are required; use dbvault list for backup names")
+			if (drill.Target == "" && !latest) || (drill.Target != "" && latest) || drill.RecoveryDatabase == "" {
+				return fmt.Errorf("specify --target or --latest, and --recovery-database")
 			}
 			if !drill.DryRun && !drill.Confirm {
 				return fmt.Errorf("--confirm is required; use --dry-run to preview")
@@ -43,9 +45,7 @@ func (o *options) recoveryCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if cfg.Database.Type != "sqlite" && cfg.Database.Type != "postgres" {
-				return fault.Wrap(fault.Unsupported, "recovery drill", fmt.Errorf("safe recovery drills support SQLite and Docker-isolated PostgreSQL only"))
-			}
+
 			adapter, err := databaseAdapter(cfg, "", o.redactor)
 			if err != nil {
 				return err
@@ -55,6 +55,22 @@ func (o *options) recoveryCommand() *cobra.Command {
 				return o.redactor.Error(fault.Wrap(fault.Storage, "initialize recovery storage", err))
 			}
 			defer closeStore()
+			if latest {
+				svc := &app.Service{Config: cfg, Store: store}
+				items, e := svc.List(ctx, "")
+				if e != nil {
+					return e
+				}
+				for _, m := range items {
+					if m.Database.Engine == cfg.Database.Type && m.Database.Name == cfg.Database.Database {
+						drill.Target = m.Name
+						break
+					}
+				}
+				if drill.Target == "" {
+					return fmt.Errorf("no matching completed backup")
+				}
+			}
 			key, err := providers.Key(store, drill.Target)
 			if err != nil {
 				return err
@@ -66,6 +82,13 @@ func (o *options) recoveryCommand() *cobra.Command {
 			display.Configure(presentation.Details{Operation: "recovery drill", Config: cfg, ConfigPath: o.configPath, Target: key, DryRun: drill.DryRun}, o.redactor)
 			stop := display.Start(ctx)
 			svc := &app.Service{Config: cfg, DB: adapter, Store: store, Observe: display.Observe}
+			if cfg.Notifications.Slack.Enabled {
+				hook := os.Getenv(cfg.Notifications.Slack.WebhookEnv)
+				if hook == "" {
+					return fmt.Errorf("Slack webhook environment variable is missing")
+				}
+				svc.Notifier = &notify.Slack{URL: hook, Channel: cfg.Notifications.Slack.Channel, Redactor: o.redactor}
+			}
 			result, checkErr := svc.RecoveryDrill(ctx, drill)
 			stop()
 			if err := o.output(c, result); err != nil {
@@ -74,8 +97,9 @@ func (o *options) recoveryCommand() *cobra.Command {
 			return o.redactor.Error(checkErr)
 		},
 	}
+	c.Flags().BoolVar(&latest, "latest", false, "Select the latest completed backup matching configured engine/database")
 	c.Flags().StringVarP(&drill.Target, "target", "t", "", targetHelp)
-	c.Flags().StringVar(&drill.RecoveryDatabase, "recovery-database", "", "NEW SQLite file or lowercase database name in a new PostgreSQL container")
+	c.Flags().StringVar(&drill.RecoveryDatabase, "recovery-database", "", "NEW SQLite file or lowercase database name in a new isolated server container")
 	c.Flags().BoolVar(&drill.Confirm, "confirm", false, "Authorize creating and restoring the isolated target")
 	c.Flags().BoolVar(&drill.DryRun, "dry-run", false, "Verify and preflight without creating or restoring the target")
 	c.Flags().BoolVar(&drill.Cleanup, "cleanup", false, "Remove this run's owned target only after successful validation")

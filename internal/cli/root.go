@@ -80,6 +80,9 @@ func newWithUpdateService(b Build, out, errOut io.Writer, updates update.Service
 	root.AddCommand(o.healthCommand(time.Now))
 	root.AddCommand(o.statusCommand(time.Now))
 	root.AddCommand(o.recoveryCommand())
+	root.AddCommand(o.metricsCommand())
+	root.AddCommand(o.encryptionCommand())
+	root.AddCommand(o.pitrCommand())
 	root.InitDefaultHelpCmd()
 	for _, command := range root.Commands() {
 		if command.Name() == "help" {
@@ -122,6 +125,16 @@ func (o *options) load(c *cobra.Command) (config.Config, error) {
 	}
 	cfg, err := config.Load(o.configPath, overrides)
 	o.redactor = security.New(os.Getenv(cfg.Database.PasswordEnv), os.Getenv(cfg.Notifications.Slack.WebhookEnv), os.Getenv(cfg.Storage.S3.AccessKeyEnv), os.Getenv(cfg.Storage.S3.SecretKeyEnv), os.Getenv("AWS_ACCESS_KEY_ID"), os.Getenv("AWS_SECRET_ACCESS_KEY"), os.Getenv("AWS_SESSION_TOKEN"), os.Getenv(cfg.Storage.Azure.AccountKeyEnv), os.Getenv("AZURE_CLIENT_SECRET"))
+	if cfg.Encryption != nil {
+		secrets := []string{}
+		for _, env := range cfg.Encryption.Keys {
+			secrets = append(secrets, os.Getenv(env))
+		}
+		for _, provider := range cfg.Encryption.Providers {
+			secrets = append(secrets, os.Getenv(provider.TokenEnv))
+		}
+		o.redactor = o.redactor.With(secrets...)
+	}
 	return cfg, o.redactor.Error(err)
 }
 func (o *options) command(name string) *cobra.Command {
@@ -133,7 +146,7 @@ func (o *options) command(name string) *cobra.Command {
 		f.StringP("database", "d", "", "Override configured database name (SQLite: file path)")
 		f.StringP("output-dir", "o", "", "Override local storage directory; does not select a backend")
 		f.String("compression", "", "Compression: none, gzip, zstd (unset: configuration)")
-		f.String("type", "full", "Backup type: full; incremental/differential are unsupported")
+		f.String("type", "full", "Backup type: full or incremental (logical dump delta)")
 		f.Bool("dry-run", false, "Validate tools and connectivity without writing a backup")
 		f.Duration("timeout", 2*time.Hour, "Operation limit; 0 disables timeout")
 	case "restore":
@@ -247,7 +260,15 @@ func (o *options) run(c *cobra.Command, name string) error {
 	}
 	// Preflight and backup dry-runs never initialize or mutate storage.
 	var store storage.Provider
-	if name != "test" && !(name == "backup" && dry) {
+	if name == "backup" && dry && cfg.Storage.Type == "local" {
+		kind, _ := c.Flags().GetString("type")
+		if kind == "incremental" {
+			if _, err := os.Stat(cfg.Storage.Local.Path); err != nil {
+				return fmt.Errorf("incremental preview requires existing backup storage; create a full backup first")
+			}
+		}
+	}
+	if name != "test" && !(name == "backup" && dry && func() bool { k, _ := c.Flags().GetString("type"); return k == "full" }()) {
 		var closeStore func() error
 		store, closeStore, err = providers.Open(ctx, cfg.Storage)
 		if err != nil {
@@ -399,7 +420,7 @@ func (o *options) run(c *cobra.Command, name string) error {
 			// artifacts as the only recovery point.
 			display.Step("cleanup.verify")
 			for _, m := range items {
-				if _, err := svc.Verify(ctx, m.Name); err != nil {
+				if err := svc.VerifyChain(ctx, m.Name); err != nil {
 					return err
 				}
 			}

@@ -19,6 +19,8 @@
 /tmp/
 /.temp/
 /.tmp-build/
+__pycache__/
+*.py[cod]
 
 # Local runtime data, backups, and schedules
 /backups/

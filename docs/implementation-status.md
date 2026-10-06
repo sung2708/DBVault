@@ -1,5 +1,72 @@
 # Verified implementation status
 
+## Independent freshness monitoring (2026-10-06)
+
+Existing logical health/JSON/metrics were reviewed before changes; no repository
+or ancestor `AGENTS.md` was present. Logical freshness remains implemented through
+completed manifests and `health.max_backup_age`. New native scope adds explicit
+source selection, full parent/artifact checks and optional stored-byte hashing
+without decryption keys or write access. Runtime preflight failures now produce
+unknown JSON reports, and health diagnostics omit raw provider/config details
+while retaining typed exit codes. `--state ""` skips local schedule metadata.
+
+Full unit tests, vet, formatting/diff checks and Windows CLI build passed.
+Uncached targeted race tests passed with `-work` after Windows prevented Go from
+deleting a test executable in the normal cleanup path. Python's six monitor tests
+passed, including seven real-CLI scenarios with no producer/database process:
+fresh/overdue/absent logical backups, storage initialization failure, and
+fresh/overdue/wrong-source native backups. HTTP storage fixtures verify typed
+provider failure/timeout exits and private-diagnostic suppression. Native service
+fixtures enforce read-only access, unknown wrapping keys, complete-chain hashing,
+missing/corrupt ancestors, boundary/future timestamps and storage errors.
+Monitor profile validation and CLI help were checked. Deployment on a real
+independent host, live cloud IAM, physical producer shutdown and actual alert
+delivery were not performed; the guide covers external supervision and limits.
+
+## v0.6.0 enhancements (2026-10-06)
+
+Version v0.6.0 adds MySQL/MongoDB isolated Docker recovery drills,
+AES-256-GCM envelope encryption with environment-referenced key rotation,
+logical dump incremental chains, Prometheus metrics and scheduled latest-backup
+recovery jobs. See [operator instructions](enhancements.md) and
+[ADR-0013](adr/0013-encrypted-incremental-recovery-operations.md).
+
+Verified locally on Windows: the full unit suite, targeted race suites, vet,
+build and protected sample configuration. Added coverage checks authenticated
+truncation/tampering and metadata binding, encrypted chain reconstruction/export,
+old-key requirements, ancestor corruption, dependency retention/deletion, lock
+contention, dry-run behavior, target ownership/isolation, failure preservation,
+scheduled SQLite recovery and HTTP metrics shutdown.
+
+The final cleanup fixes were rechecked with an uncached full unit run and race
+checks. Regression cases cover retained-chain ancestry, child-before-base
+deletion ordering, cyclic dependencies, deletion previews of referenced bases,
+and complete stored-chain verification with a corrupt ancestor.
+The combined Docker integration suite was rerun successfully after these fixes
+(513.562 seconds), including all three server engines, SQLite, and cloud storage
+emulators. No recovery containers remained after completion.
+
+Real Docker PostgreSQL/MySQL/MongoDB backup/destroy/restore workflows passed,
+including encrypted logical increments and isolated recovery evidence. Native
+fixtures compare restored data and preserve source data. S3/GCS/Azure emulator
+workflows passed with encrypted full backups across all codecs and encrypted
+increments, reconstruction, recovery drills and dependency-safe deletion.
+
+During validation, MySQL recovery was corrected to require TLS, and MongoDB
+readiness was corrected to wait for the final PID-1 daemon instead of its
+entrypoint's temporary authenticated server. Native workflows passed after these
+corrections. No release publication or live-cloud IAM/KMS validation was run.
+Native `pitr` commands now add cluster/instance baselines and WAL/binlog/oplog
+capture, plus AWS KMS and Vault Transit v2 envelope providers. See
+[native recovery](pitr.md) and [managed keys](managed-keys.md) for prerequisites,
+fresh-target requirements and format details. PostgreSQL prepares an offline
+target; the operator starts the matching server and checks that replay reached
+the target. Native retention/scheduling are available through native jobs and
+whole-chain cleanup.
+Differential backups and cross-timeline PostgreSQL restore remain unsupported.
+Logical increments still scan the full database and use temporary
+disk. Older release sections below describe their historical implementation.
+
 ## Restore workflows (`v0.5.0`)
 
 Release v0.5.0 adds new destinations named with UTC date/time, optional
@@ -296,6 +363,45 @@ S3 unknown-size streams use 128 MiB parts, one worker and at most 10,000 parts
 abandoned upload sessions; configure lifecycle policies and inspect orphans.
 SDK retries do not resume uploads across restarts. Scheduling is a foreground
 singleton, loads state at startup, skips overlaps and does not replay missed runs.
+
+## Native PITR and managed-key verification (2026-10-06)
+
+Native automation now includes saved `pitr` jobs, automatic source-specific parent
+selection, explicit periodic baseline refresh and optional post-backup retention.
+Native retention counts complete baseline chains, protects the newest baseline
+per source (including timestamp ties), validates ancestry, and verifies archives
+before child-first deletion. A shared storage lock protects publication,
+cleanup and restoration across CLI processes. Unit and race checks cover initial
+baseline creation, refresh, no silent fallback after capture errors, source
+selection, empty ranges, retained-archive corruption, missing parents, cycles,
+chain limits, previews, deletion ordering, lock contention and persisted job
+options. A Windows regression uncovered stale TAR file sizes while the dump
+writer remained open; MySQL dumps and MongoDB oplog writers now close before
+publication. Full unit tests, targeted race checks, vet and Windows build passed.
+Docker automation fixtures passed MySQL with GTID OFF/ON and MongoDB. PostgreSQL
+initially exceeded the old two-minute startup-readiness window while fsyncing its
+physical directory on a Windows bind mount; the fixture now allows five minutes.
+Its final isolated rerun passed in 331.784 seconds, verifying paused WAL replay
+and exact restored IDs. MySQL/MongoDB passed again with the final writer-close
+fixes in 438.432 seconds. The fixtures use `pitr backup` for both initial baseline
+creation and automatic-parent log capture with post-publication cleanup, then
+check timestamp recovery and unchanged source data.
+
+Docker fixtures exercised native PostgreSQL WAL, MySQL binlogs with GTID both
+OFF and ON, and MongoDB majority-committed oplogs. Each fixture captures changes
+after one baseline and checks exact restored IDs before an exclusive timestamp,
+while preserving the source rows. PostgreSQL fixtures start the prepared cluster
+and confirm that recovery pauses at the requested target. The combined native
+and managed-key integration run passed in 521.996 seconds. After adding target
+visibility checks, MySQL (GTID OFF/ON), MongoDB and managed keys passed again;
+the aggregate run exhausted its previous 15-minute fixture deadline before
+PostgreSQL restore. The isolated PostgreSQL rerun passed in 98.229 seconds.
+The fixture deadline is now 25 minutes and CI allows 30 minutes.
+
+Managed-key fixtures use LocalStack KMS and a real local Vault Transit server,
+including key rotation and encrypted logical full/incremental restoration.
+Unit coverage checks provider protocols, metadata binding, tampering and endpoint
+restrictions. Targeted race checks and vet passed. See [ADR-0014](adr/0014-native-pitr-managed-keys.md).
 
 Live cloud IAM/KMS, actual Slack delivery, macOS native execution,
 multi-architecture published images and deployment operations are unverified.

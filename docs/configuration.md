@@ -1,5 +1,13 @@
 # Configuration Reference
 
+For native WAL/binlog/oplog configuration, scheduled baseline refresh and
+whole-chain retention, see [native PITR](pitr.md). Native cleanup uses the same
+`retention.keep_days` and `keep_count` settings; its count is independent baseline
+chains, while logical cleanup counts logical backups.
+
+For client-side encryption, logical incremental chains, all-engine isolated
+recovery drills, metrics and recurring recovery jobs, see [operator instructions](enhancements.md).
+
 This document provides a comprehensive reference for the DBVault configuration schema, environment variable overrides, and precedence rules.
 
 ## Implemented schema
@@ -13,7 +21,8 @@ Setup uses explicit flags, then interactive answers (when available), then runti
 defaults. It does not copy runtime environment overrides into the generated YAML;
 those overrides still apply when loading the file for operations. The default
 password reference is `DBVAULT_DB_PASSWORD`. No plaintext secret is generated.
-The default compression remains gzip level 6. Only full backup is offered.
+The default compression remains gzip level 6. Full backup is the default;
+`backup --type incremental` selects logical dump delta chains.
 For PostgreSQL, MySQL and MongoDB, `init` discovers a complete native toolset
 from `PATH` or supported platform locations and stores its absolute paths under
 `database.tools`. Existing YAML without that map stays valid and resolves tools
@@ -84,6 +93,13 @@ unless concrete missing/corrupt backup evidence already makes it critical.
 The policy applies to the single configured database and has no environment or
 CLI override. Cron and retention settings do not supply an implicit policy.
 See [health](cli-reference.md#dbvault-health) for exact boundaries and exit codes.
+
+`health.backup_scope` defaults to `logical`; `pitr` selects instance-wide native
+coverage and requires `health.source_identity` matching the record's `identity`
+from `pitr list --json`. SQLite native scope is rejected. Source identity is a
+non-secret server/replica-set identifier, never a password or key. The monitor
+can use a separate configuration with the same storage and no database/client
+encryption credentials. See [independent deployment](independent-monitoring.md).
 
 ### Stored-artifact verification policy
 

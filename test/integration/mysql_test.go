@@ -93,6 +93,7 @@ func TestMySQLBackupDestroyRestore(t *testing.T) {
 			}
 			assertBackupHealth(t, ctx, s, m)
 			if kind == "none" {
+				m = assertServerRecoveryUpgrade(t, ctx, s, m)
 				assertNewRestoreWorkflow(t, ctx, s, m)
 			}
 			query("DROP TABLE items")

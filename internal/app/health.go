@@ -23,10 +23,13 @@ const (
 
 // HealthReport uses the existing completed manifests as its only registry.
 type HealthReport struct {
+	Reason    string           `json:"reason,omitempty"`
 	Status    HealthStatus     `json:"status"`
 	Databases []DatabaseHealth `json:"databases"`
 }
 type DatabaseHealth struct {
+	BackupScope         string           `json:"backup_scope,omitempty"`
+	SourceIdentity      string           `json:"source_identity,omitempty"`
 	Name                string           `json:"name"`
 	Engine              string           `json:"engine"`
 	Status              HealthStatus     `json:"status"`
@@ -58,9 +61,10 @@ type HealthBackup struct {
 	Status      string    `json:"status"`
 }
 type HealthSchedule struct {
-	ID      string `json:"id"`
-	Cron    string `json:"cron"`
-	Enabled bool   `json:"enabled"`
+	Operation string `json:"operation,omitempty"`
+	ID        string `json:"id"`
+	Cron      string `json:"cron"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // HealthFailure is a completed check with a non-healthy monitoring result.
@@ -74,6 +78,9 @@ func (e *HealthFailure) Error() string { return "backup health: " + string(e.Sta
 // Default mode never opens archive contents. Explicit --verify uses the shared
 // verifier and persists a small immutable record for the selected backup.
 func (s *Service) Health(ctx context.Context, verify bool) (HealthReport, error) {
+	if s.Config.Health.BackupScope == "pitr" {
+		return s.nativeHealth(ctx, verify)
+	}
 	h := DatabaseHealth{Name: s.Config.Database.Database, Engine: s.Config.Database.Type,
 		Status: Unknown, Integrity: "unknown", RestoreTest: "unknown"}
 	finish := func(err error) (HealthReport, error) {
@@ -272,6 +279,12 @@ func (s *Service) Health(ctx context.Context, verify bool) (HealthReport, error)
 		}
 	}
 	if verify {
+		if err := s.dependencyChain(ctx, *latest, true); err != nil {
+			h.Status = Critical
+			h.Integrity = "failed"
+			h.Reason = "Incremental dependency verification failed"
+			return finish(err)
+		}
 		if _, err := s.Verify(ctx, latest.Name); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				h.Status = Unknown
@@ -288,6 +301,13 @@ func (s *Service) Health(ctx context.Context, verify bool) (HealthReport, error)
 		h.Integrity = "verified"
 		at := s.now()
 		h.LastVerifiedAt = &at
+	}
+	if !verify {
+		if err := s.dependencyChain(ctx, *latest, false); err != nil {
+			h.Status = Critical
+			h.Reason = "Incremental dependency is missing or invalid"
+			return finish(err)
+		}
 	}
 	// A slow scan or active verification can cross the configured age limit.
 	// Freshness reflects evaluation completion, rather than the start of I/O.

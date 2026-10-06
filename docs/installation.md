@@ -1,5 +1,18 @@
 # Installation Guide
 
+Version `v0.6.0` includes native PITR, managed encryption keys, native scheduling
+and independent freshness monitoring. Install the version explicitly with:
+
+```bash
+go install github.com/sung2708/DBVault/cmd/dbvault@v0.6.0
+```
+
+Binary/container assets become available after the release workflow succeeds.
+For a monitoring host, follow [independent monitoring](independent-monitoring.md):
+database tools and producer encryption keys are unnecessary for default health
+checks against shared storage. The example Python freshness probe requires
+Python 3 and is shipped in the source tree under `scripts/monitor-backups.py`.
+
 This document describes how to install DBVault, configure native database dependencies across supported operating systems, and verify your environment.
 
 Go 1.26+ is required to build the current implementation. Published releases

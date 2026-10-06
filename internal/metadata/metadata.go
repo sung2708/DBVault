@@ -32,21 +32,35 @@ type Checksum struct {
 	Algorithm string `json:"algorithm"`
 	Hash      string `json:"hash"`
 }
+type Encryption struct {
+	Algorithm string `json:"algorithm"`
+	KeyID     string `json:"key_id"`
+}
+type Delta struct {
+	BaseName string `json:"base_name"`
+	BaseID   string `json:"base_id"`
+	BaseHash string `json:"base_sha256"`
+	RawHash  string `json:"raw_sha256"`
+	Depth    int    `json:"depth"`
+}
+
 type Manifest struct {
-	Version            string    `json:"manifest_version"`
-	ID                 string    `json:"backup_id"`
-	Name               string    `json:"backup_name"`
-	BackupType         string    `json:"backup_type"`
-	CreatedAt          time.Time `json:"created_at"`
-	CompletedAt        time.Time `json:"completed_at"`
-	Database           Database  `json:"database"`
-	Pipeline           Pipeline  `json:"pipeline"`
-	Checksum           Checksum  `json:"checksum"`
-	Duration           float64   `json:"duration_seconds"`
-	Status             string    `json:"status"`
-	ApplicationVersion string    `json:"application_version"`
-	ToolVersion        string    `json:"database_tool_version"`
-	Storage            string    `json:"storage_provider"`
+	Encryption         *Encryption `json:"encryption,omitempty"`
+	Delta              *Delta      `json:"delta,omitempty"`
+	Version            string      `json:"manifest_version"`
+	ID                 string      `json:"backup_id"`
+	Name               string      `json:"backup_name"`
+	BackupType         string      `json:"backup_type"`
+	CreatedAt          time.Time   `json:"created_at"`
+	CompletedAt        time.Time   `json:"completed_at"`
+	Database           Database    `json:"database"`
+	Pipeline           Pipeline    `json:"pipeline"`
+	Checksum           Checksum    `json:"checksum"`
+	Duration           float64     `json:"duration_seconds"`
+	Status             string      `json:"status"`
+	ApplicationVersion string      `json:"application_version"`
+	ToolVersion        string      `json:"database_tool_version"`
+	Storage            string      `json:"storage_provider"`
 }
 
 var unsafeName = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
@@ -70,8 +84,24 @@ func (m Manifest) Validate() error {
 	if m.Version != "1.0" {
 		return fmt.Errorf("unsupported manifest_version")
 	}
-	if m.Status != "completed" || m.Name == "" || m.ID == "" || m.BackupType != "full" {
+	if m.Status != "completed" || m.Name == "" || m.ID == "" || (m.BackupType != "full" && m.BackupType != "incremental") {
 		return fmt.Errorf("invalid completed backup manifest")
+	}
+	if m.Encryption != nil && ((m.Encryption.Algorithm != "aes256-gcm-stream-v1" && m.Encryption.Algorithm != "aes256-gcm-stream-v2") || m.Encryption.KeyID == "" || len(m.Encryption.KeyID) > 128) {
+		return fmt.Errorf("invalid encryption metadata")
+	}
+	if m.BackupType == "incremental" {
+		if m.Delta == nil || m.Delta.BaseName == m.Name || m.Delta.BaseName == "" || strings.ContainsAny(m.Delta.BaseName, "/\\") || m.Delta.BaseID == "" || m.Delta.Depth < 1 || m.Delta.Depth > 32 {
+			return fmt.Errorf("invalid incremental base")
+		}
+		for _, h := range []string{m.Delta.BaseHash, m.Delta.RawHash} {
+			v, e := hex.DecodeString(h)
+			if e != nil || len(v) != 32 {
+				return fmt.Errorf("invalid incremental hash")
+			}
+		}
+	} else if m.Delta != nil {
+		return fmt.Errorf("full backup cannot reference a base")
 	}
 	if m.Database.Name == "" {
 		return fmt.Errorf("missing database_name")

@@ -44,9 +44,10 @@ type StatusRecovery struct {
 	Note        string     `json:"note,omitempty"`
 }
 type StatusSchedule struct {
-	ID      string `json:"id"`
-	Cron    string `json:"cron"`
-	Enabled bool   `json:"enabled"`
+	Operation string `json:"operation,omitempty"`
+	ID        string `json:"id"`
+	Cron      string `json:"cron"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // BuildStatus projects existing health evidence into an operator-facing view.
@@ -84,7 +85,7 @@ func (s *Service) BuildStatus(health HealthReport, schedules []HealthSchedule, s
 		}
 	}
 	for _, job := range schedules {
-		result.Schedules = append(result.Schedules, StatusSchedule{ID: job.ID, Cron: job.Cron, Enabled: job.Enabled})
+		result.Schedules = append(result.Schedules, StatusSchedule{ID: job.ID, Cron: job.Cron, Enabled: job.Enabled, Operation: job.Operation})
 	}
 	if len(result.RecentBackups) > 0 {
 		last := result.RecentBackups[0]

@@ -59,8 +59,9 @@ controlling both archive and manifest can replace a backup. Cloud credentials
 use official SDK chains or named env variables. MongoDB credentials use a
 temporary private YAML file, removed on return; process termination by force or
 host failure can leave this file. Secure the operator's temp directory and Windows
-ACLs. Slack requires HTTPS and redacts resolved secrets. Client-side encryption
-remains unsupported. See ADRs 0007–0009 for implementation choices.
+ACLs. Slack requires HTTPS and redacts resolved secrets. Optional client-side AES-256-GCM envelope encryption protects archive content.
+Key IDs reference environment variables; retain previous keys for old backups
+and incremental ancestors. Metadata remains visible. See [operator instructions](enhancements.md). See ADRs 0007–0009 for implementation choices.
 
 ---
 
@@ -76,7 +77,7 @@ remains unsupported. See ADRs 0007–0009 for implementation choices.
 | **Overly Permissive File Permissions** | Medium | Enforce `0700` for created directories and `0600` for generated backup archives. | Implemented |
 | **Accidental Database Overwrite** | High | Mandate the explicit `--confirm` flag for all destructive restore operations. | Implemented |
 | **Cloud Credential Exposure** | High | Official SDK credential chains or named env variables, with redaction. | Implemented |
-| **Data-at-Rest Exposure** | High | Client-side envelope encryption using AES-256-GCM. | Planned |
+| **Data-at-Rest Exposure** | High | Optional client-side envelope encryption using AES-256-GCM and environment-referenced wrapping keys. | Implemented |
 
 ---
 

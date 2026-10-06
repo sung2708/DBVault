@@ -20,3 +20,5 @@ This directory contains the Architecture Decision Records for DBVault. ADRs capt
 | [ADR-0010](0010-safe-recovery-drills.md) | Fail-closed SQLite recovery drills and separate evidence | Accepted | 2026-10-01 |
 | [ADR-0011](0011-postgresql-container-recovery.md) | PostgreSQL recovery in an owned network-isolated Docker server | Accepted | 2026-10-02 |
 | [ADR-0012](0012-restore-workflows-and-history.md) | Verified restore destinations, safety backups and separate history | Accepted | 2026-10-02 |
+| [ADR-0013](0013-encrypted-incremental-recovery-operations.md) | Encrypted logical delta chains, metrics and scheduled recovery | Accepted | 2026-10-06 |
+| [ADR-0014](0014-native-pitr-managed-keys.md) | Native log chains, PITR and managed envelope keys | Accepted | 2026-10-06 |

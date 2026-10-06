@@ -18,7 +18,9 @@ the archive name from list, not the manifest ID. Local paths remain confined to
 the configured root; cloud targets are flat names.
 
 Compression and retention overrides describe configuration-derived defaults.
-Only full backups are advertised. Restore selectors identify supported engines;
+Full and logical delta incremental backups are advertised. Encryption key
+generation, metrics and recurring recovery flags are also available; see
+[current operator instructions](enhancements.md). Restore selectors identify supported engines;
 `--clean` identifies PostgreSQL and MongoDB. Restore/delete describe confirmation
 and dry-run; cleanup explicitly warns that non-dry-run deletion is immediate and
 does not require a confirmation flag. Schedule help distinguishes saved definitions

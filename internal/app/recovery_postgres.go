@@ -132,6 +132,11 @@ func (s *Service) postgresRecoveryDrill(ctx context.Context, o DrillOptions, nat
 		if m.Database.Engine != "postgres" || m.Database.Format != target.Format() {
 			return r, fault.Wrap(fault.Unsupported, "recovery compatibility", fmt.Errorf("backup engine or format differs from PostgreSQL"))
 		}
+		payload, e := work.materializeSnapshot(ctx, m, snapshot, 0)
+		if e != nil {
+			return r, e
+		}
+		removeTemp(payload)
 		if err := prepare(ctx, m); err != nil {
 			return r, err
 		}

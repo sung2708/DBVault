@@ -85,7 +85,18 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go test -race ./...
-      - run: go test -v -timeout=20m -tags=integration ./test/integration/...
+      - name: Native tools and complete integration suite
+        shell: bash
+        run: |
+          mkdir -p .tmp-build
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o .tmp-build/dbvault-native-linux ./cmd/dbvault
+          docker build -f Dockerfile.mysql-native-tools -t dbvault:native-mysql-tools .
+          export DBVAULT_NATIVE_BINARY="$PWD/.tmp-build/dbvault-native-linux"
+          go test -v -timeout=30m -tags=integration ./test/integration/...
+      - name: Independent freshness probe
+        shell: bash
+        run: |
+          DBVAULT_MONITOR_BINARY="$PWD/.tmp-build/dbvault-native-linux" python3 -B -m unittest discover -s scripts -p test_monitor_backups.py -v
   archives:
     needs: validate
     runs-on: ubuntu-latest

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sung2708/DBVault/internal/compression"
 	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/database"
 	"github.com/sung2708/DBVault/internal/metadata"
@@ -334,16 +333,12 @@ func (s *Service) Export(ctx context.Context, key, path string, decompress bool)
 	var src io.Reader = pipeline.Reader{Context: ctx, Source: f}
 	expected := m.Pipeline.Stored
 	if decompress {
-		c, e := compression.New(m.Pipeline.Compression, m.Pipeline.Level)
+		payload, e := s.materializeSnapshot(ctx, m, f, 0)
 		if e != nil {
 			return result, e
 		}
-		r, e := c.Decompress(src)
-		if e != nil {
-			return result, e
-		}
-		defer r.Close()
-		src = r
+		defer removeTemp(payload)
+		src = payload
 		expected = m.Pipeline.Raw
 	}
 	// Exclusive creation never overwrites a local backup, manifest or user file.

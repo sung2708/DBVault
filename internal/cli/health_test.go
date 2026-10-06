@@ -33,7 +33,9 @@ func TestHealthCLI(t *testing.T) {
 		{"fresh JSON", []string{"--verify", "--output", "json"}, "12h", time.Hour, true, 0, app.Healthy},
 		{"warning JSON", []string{"--json"}, "12h", time.Hour, true, 1, app.Warning},
 		{"stale", nil, "12h", 13 * time.Hour, true, 1, app.Critical},
+		{"stale JSON", []string{"--output", "json"}, "12h", 13 * time.Hour, true, 1, app.Critical},
 		{"no backup", nil, "12h", 0, false, 1, app.Critical},
+		{"no backup JSON", []string{"--json"}, "12h", 0, false, 1, app.Critical},
 		{"no policy", []string{"--verify", "--json"}, "", time.Hour, true, 1, app.Unknown},
 		{"quiet", []string{"--quiet"}, "12h", time.Hour, true, 1, app.Warning},
 		{"no color", []string{"--no-color"}, "12h", time.Hour, true, 1, app.Warning},
@@ -121,6 +123,31 @@ func TestHealthSchedules(t *testing.T) {
 		}
 		if r.Status != want {
 			t.Fatal(r)
+		}
+	}
+}
+
+func TestNativeScheduleDefinitionsRemainAdvisory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "monitor.yaml")
+	for _, enabled := range []bool{false, true} {
+		maxAge := float64(3600)
+		r := app.HealthReport{Status: app.Healthy, Databases: []app.DatabaseHealth{{BackupScope: "pitr", Status: app.Healthy, MaxAgeSeconds: &maxAge}}}
+		state := schedule.State{Jobs: []schedule.Job{{ID: "logical", Config: path, Operation: "backup", Enabled: true}, {ID: "native", Config: path, Operation: "pitr", Enabled: enabled}}}
+		if err := healthSchedules(&r, state, path); err != nil {
+			t.Fatal(err)
+		}
+		want := app.Warning
+		if enabled {
+			want = app.Healthy
+		}
+		if r.Status != want || !strings.Contains(r.Databases[0].ScheduleNote, "do not prove") {
+			t.Fatal(r)
+		}
+		// No definition is allowed to upgrade stale evidence to healthy.
+		r.Status = app.Critical
+		r.Databases[0].Status = app.Critical
+		if err := healthSchedules(&r, state, path); err != nil || r.Status != app.Critical {
+			t.Fatal(r, err)
 		}
 	}
 }

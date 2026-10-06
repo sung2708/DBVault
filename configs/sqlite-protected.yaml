@@ -1,0 +1,21 @@
+version: "1"
+database:
+  type: sqlite
+  database: ./demo.sqlite
+storage:
+  type: local
+  local:
+    path: ./backups
+compression:
+  type: zstd
+  level: 6
+health:
+  max_backup_age: 24h
+protection:
+  verify_after_backup: true
+encryption:
+  key_id: v1
+  keys:
+    v1: DBVAULT_KEY_V1
+metrics:
+  record_operations: true

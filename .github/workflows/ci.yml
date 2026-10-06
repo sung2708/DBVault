@@ -34,8 +34,14 @@ jobs:
           "$GOBIN/dbvault" init --non-interactive --database sqlite --database-name ./init.db --storage local --config ./init.yaml --output json
           "$GOBIN/dbvault" config --config ./init.yaml
           "$GOBIN/dbvault" doctor --help
+          DBVAULT_MONITOR_BINARY="$GOBIN/dbvault" python3 -B -m unittest discover -s "$GITHUB_WORKSPACE/scripts" -p test_monitor_backups.py -v
       - name: Database and cloud emulator backup-destroy-restore drills
-        run: go test -v -timeout=20m -tags=integration ./test/integration/...
+        run: |
+          mkdir -p .tmp-build
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o .tmp-build/dbvault-native-linux ./cmd/dbvault
+          docker build -f Dockerfile.mysql-native-tools -t dbvault:native-mysql-tools .
+          export DBVAULT_NATIVE_BINARY="$PWD/.tmp-build/dbvault-native-linux"
+          go test -v -timeout=30m -tags=integration ./test/integration/...
   build:
     strategy:
       matrix:
@@ -92,8 +98,8 @@ jobs:
           if [ "$ENGINE" != sqlite ]; then
             test "$(docker run --rm --entrypoint id dbvault:smoke -u)" != 0
             case "$ENGINE" in
-              postgres) tools="pg_dump pg_restore psql" ;;
-              mysql) tools="mysqldump mysql" ;;
+              postgres) tools="pg_dump pg_restore psql pg_basebackup" ;;
+              mysql) tools="mysqldump mysql mysqlbinlog" ;;
               mongodb) tools="mongodump mongorestore" ;;
             esac
             for tool in $tools; do docker run --rm --entrypoint "$tool" dbvault:smoke --version; done

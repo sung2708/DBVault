@@ -25,6 +25,9 @@ func New(secrets ...string) *Redactor {
 	}
 	return r
 }
+func (r *Redactor) With(secrets ...string) *Redactor {
+	return New(append(append([]string{}, r.secrets...), secrets...)...)
+}
 func (r *Redactor) Text(s string) string {
 	for _, secret := range r.secrets {
 		s = strings.ReplaceAll(s, secret, "[REDACTED]")

@@ -1,5 +1,18 @@
 # Scheduling & Automated Backups
 
+To detect missed backups even when the producer host is powered off, run
+storage-based checks from another host. See [independent monitoring](independent-monitoring.md)
+for read-only profiles, a runnable freshness probe, JSON/exit contracts and
+Prometheus missing-data alerts. An enabled schedule is not execution evidence.
+
+Native WAL/binlog/oplog jobs use `schedule add --operation pitr`. They support
+`--type full|incremental`, optional `--base-every 24h`, and `--cleanup` to apply
+whole-chain retention after publication. See [native scheduling and retention](pitr.md#scheduled-capture-and-retention)
+for engine prerequisites and MongoDB baseline maintenance requirements.
+
+For client-side encryption, logical incremental chains, all-engine isolated
+recovery drills, metrics and recurring recovery jobs, see [operator instructions](enhancements.md).
+
 This guide outlines strategies and configurations for automating periodic database backups using DBVault.
 
 Use `dbvault health --output json` from an external monitor to check backup

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/spf13/cobra"
+	"github.com/sung2708/DBVault/internal/app"
+	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/schedule"
 	"path/filepath"
 	"time"
@@ -36,26 +38,7 @@ func (o *options) scheduleCommand() *cobra.Command {
 		display := o.display(c)
 		display.Status("active", fmt.Sprintf("Starting foreground scheduler: %d enabled jobs. Ctrl+C stops active work.", enabled))
 		return schedule.Run(c.Context(), jobs, func(ctx context.Context, j schedule.Job) error {
-			jobCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
-			defer cancel()
-			// Reuse the same command/service pipeline and reload credentials each run.
-			command := New(o.build, c.OutOrStdout(), c.ErrOrStderr())
-			command.Annotations = map[string]string{"dbvault.scheduled": "true"}
-			args := []string{"backup", "--config", j.Config}
-			if jsonMode(c) {
-				args = append(args, "--output", "json")
-			}
-			if globalBool(c, "quiet") {
-				args = append(args, "--quiet")
-			}
-			if globalBool(c, "no-color") {
-				args = append(args, "--no-color")
-			}
-			if o.verbose {
-				args = append(args, "--verbose")
-			}
-			command.SetArgs(args)
-			return command.ExecuteContext(jobCtx)
+			return o.executeScheduledJob(c, ctx, j)
 		}, func(r schedule.Result) {
 			if jsonMode(c) && (r.Skipped || r.Err != nil) {
 				status := "failed"
@@ -98,10 +81,19 @@ func (o *options) scheduleCommand() *cobra.Command {
 			cmd.Flags().StringVar(&id, "id", "", "Required schedule ID (1-64 letters, digits, underscores or hyphens)")
 			cmd.MarkFlagRequired("id")
 		}
-		var cronExpr string
+		var cronExpr, operation, backupType, recoveryDir string
+		var confirmRecovery bool
+		var baseEvery string
+		var cleanup bool
 		if a == "add" {
 			cmd.Flags().StringVar(&cronExpr, "cron", "", "Required five-field cron expression (UTC; supports CRON_TZ)")
 			cmd.MarkFlagRequired("cron")
+			cmd.Flags().StringVar(&operation, "operation", "backup", "Schedule backup, pitr (native baseline/log capture), or recovery")
+			cmd.Flags().StringVar(&baseEvery, "base-every", "", "PITR baseline refresh interval; default uses separate full jobs")
+			cmd.Flags().BoolVar(&cleanup, "cleanup", false, "PITR: delete expired whole chains after each successful backup")
+			cmd.Flags().StringVar(&backupType, "type", "", "Backup type: full or incremental")
+			cmd.Flags().StringVar(&recoveryDir, "recovery-dir", "", "Existing private directory for NEW SQLite drill files")
+			cmd.Flags().BoolVar(&confirmRecovery, "confirm", false, "Authorize recurring isolated recovery drills")
 		}
 		cmd.RunE = func(c *cobra.Command, _ []string) error {
 			if a == "list" {
@@ -113,14 +105,32 @@ func (o *options) scheduleCommand() *cobra.Command {
 			}
 			var job schedule.Job
 			if a == "add" {
-				if _, e := o.load(c); e != nil {
+				cfg, e := o.load(c)
+				if e != nil {
 					return e
+				}
+				if operation == "recovery" {
+					if !confirmRecovery {
+						return fmt.Errorf("--confirm is required to authorize recurring recovery drills")
+					}
+					if cfg.Database.Type == "sqlite" && recoveryDir == "" {
+						return fmt.Errorf("SQLite recovery schedule requires --recovery-dir")
+					}
+					if recoveryDir != "" {
+						recoveryDir, e = filepath.Abs(recoveryDir)
+						if e != nil {
+							return e
+						}
+					}
+				}
+				if operation == "pitr" && (cfg.PITR == nil || (cfg.Database.Type != "postgres" && cfg.Database.Type != "mysql" && cfg.Database.Type != "mongodb")) {
+					return fmt.Errorf("native schedule requires pitr configuration and PostgreSQL, MySQL or MongoDB")
 				}
 				abs, e := filepath.Abs(o.configPath)
 				if e != nil {
 					return e
 				}
-				job = schedule.Job{ID: id, Cron: cronExpr, Config: abs, Enabled: true}
+				job = schedule.Job{ID: id, Cron: cronExpr, Config: abs, Enabled: true, Operation: operation, BackupType: backupType, RecoveryDirectory: recoveryDir, BaseEvery: baseEvery, Cleanup: cleanup}
 				if e = schedule.Validate(job); e != nil {
 					return e
 				}
@@ -158,4 +168,59 @@ func (o *options) scheduleCommand() *cobra.Command {
 		daemon.AddCommand(cmd)
 	}
 	return daemon
+}
+
+func (o *options) executeScheduledJob(c *cobra.Command, ctx context.Context, j schedule.Job) error {
+	jobCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+	defer cancel()
+	// Reuse the same command/service pipeline and reload credentials each run.
+	command := New(o.build, c.OutOrStdout(), c.ErrOrStderr())
+	command.Annotations = map[string]string{"dbvault.scheduled": "true"}
+	args := []string{"backup", "--config", j.Config}
+	if j.BackupType != "" {
+		args = append(args, "--type", j.BackupType)
+	}
+	if j.Operation == "pitr" {
+		args = []string{"pitr", "backup", "--config", j.Config}
+		if j.BackupType != "" {
+			args = append(args, "--type", j.BackupType)
+		}
+		if j.BaseEvery != "" {
+			args = append(args, "--base-every", j.BaseEvery)
+		}
+		if j.Cleanup {
+			args = append(args, "--cleanup")
+		}
+	}
+	if j.Operation == "recovery" {
+		cfg, e := config.Load(j.Config, config.Overrides{})
+		if e != nil {
+			return e
+		}
+		destination, e := app.NewDestination(cfg.Database.Type, cfg.Database.Database, time.Now())
+		if e != nil {
+			return e
+		}
+		if cfg.Database.Type == "sqlite" {
+			if j.RecoveryDirectory == "" {
+				return fmt.Errorf("SQLite recovery schedule requires --recovery-dir")
+			}
+			destination = filepath.Join(j.RecoveryDirectory, filepath.Base(destination))
+		}
+		args = []string{"recovery", "drill", "--config", j.Config, "--latest", "--recovery-database", destination, "--confirm", "--cleanup"}
+	}
+	if jsonMode(c) {
+		args = append(args, "--output", "json")
+	}
+	if globalBool(c, "quiet") {
+		args = append(args, "--quiet")
+	}
+	if globalBool(c, "no-color") {
+		args = append(args, "--no-color")
+	}
+	if o.verbose {
+		args = append(args, "--verbose")
+	}
+	command.SetArgs(args)
+	return command.ExecuteContext(jobCtx)
 }

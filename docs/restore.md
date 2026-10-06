@@ -29,7 +29,8 @@ reuses the verified snapshot and performs read-only catalog/table readability
 checks. Preload the trusted official image matching the source major; see
 [PostgreSQL drill setup](installation.md#postgresql-recovery-drills) and
 [ADR-0011](adr/0011-postgresql-container-recovery.md).
-MySQL/MongoDB drills remain unsupported. Existing normal restore follows its
+The current checkout adds [MySQL/MongoDB isolated drills](enhancements.md).
+Existing normal restore follows its
 existing confirmation contract. See [CLI semantics](cli-reference.md#dbvault-recovery-drill).
 
 All adapters verify the exact compressed snapshot before writes. MySQL restores

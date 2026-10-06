@@ -1,0 +1,23 @@
+# Install on the MONITOR host. Match the producer's engine, exact database name
+# and bucket/prefix. Use a read-only workload identity, not producer credentials.
+version: "1"
+database:
+  type: postgres
+  database: production
+  user: unused-monitor-placeholder
+  password_env: MONITOR_UNUSED_DB_PASSWORD # Leave unset: health never connects.
+storage:
+  type: s3
+  s3:
+    bucket: my-backup-bucket
+    region: us-east-1
+    prefix: dbvault/production
+health:
+  max_backup_age: 7h # Example: backup every 6h plus duration/grace.
+  backup_scope: logical
+# PITR alternative (instance scope; database above is only a profile label):
+# health:
+#   max_backup_age: 15m
+#   backup_scope: pitr
+#   source_identity: REPLACE_WITH_IDENTITY_FROM_PITR_LIST
+# No database password, notifications, native tools or client encryption keys.

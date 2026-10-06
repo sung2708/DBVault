@@ -21,6 +21,7 @@ import (
 	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/recoverypostgres"
+	"github.com/sung2708/DBVault/internal/recoveryserver"
 	"github.com/sung2708/DBVault/internal/storage"
 	"github.com/sung2708/DBVault/internal/storage/local"
 )
@@ -56,9 +57,19 @@ type DrillResult struct {
 }
 
 // RecoveryDrill uses exclusively created files or a confined Docker server.
-func (s *Service) RecoveryDrill(ctx context.Context, o DrillOptions) (DrillResult, error) {
+func (s *Service) RecoveryDrill(ctx context.Context, o DrillOptions) (result DrillResult, err error) {
+	start := s.now()
+	defer func() {
+		if !o.DryRun {
+			s.recordOperation(ctx, "recovery", start, 0, err)
+			s.notify(ctx, "recovery", metadata.Manifest{ID: result.BackupID, Duration: result.DurationSeconds}, err)
+		}
+	}()
 	if s.Config.Database.Type == "postgres" {
 		return s.postgresRecoveryDrill(ctx, o, nil)
+	}
+	if s.Config.Database.Type == "mysql" || s.Config.Database.Type == "mongodb" {
+		return s.serverRecoveryDrill(ctx, o, nil)
 	}
 	cfg := s.Config.Database
 	cfg.Database = o.RecoveryDatabase
@@ -428,7 +439,7 @@ func DecodeDrill(reader io.Reader) (DrillResult, error) {
 	if err := d.Decode(&extra); err != io.EOF {
 		return r, fmt.Errorf("trailing or oversized recovery record")
 	}
-	if r.Version != 1 || r.DryRun || r.BackupID == "" || r.BackupName == "" || r.SourceDatabase == "" || (r.Engine != "sqlite" && r.Engine != "postgres") || r.StartedAt.IsZero() || r.CompletedAt.Before(r.StartedAt) || r.DurationSeconds < 0 {
+	if r.Version != 1 || r.DryRun || r.BackupID == "" || r.BackupName == "" || r.SourceDatabase == "" || (r.Engine != "sqlite" && r.Engine != "postgres" && r.Engine != "mysql" && r.Engine != "mongodb") || r.StartedAt.IsZero() || r.CompletedAt.Before(r.StartedAt) || r.DurationSeconds < 0 {
 		return r, fmt.Errorf("invalid recovery evidence")
 	}
 	hash, err := hex.DecodeString(r.Checksum)
@@ -462,6 +473,12 @@ func DecodeDrill(reader io.Reader) (DrillResult, error) {
 		method := "SQLite PRAGMA integrity_check and sqlite_schema query"
 		if r.Engine == "postgres" {
 			method = recoverypostgres.ValidationMethod
+		}
+		if r.Engine == "mysql" {
+			method = recoveryserver.MySQLValidation
+		}
+		if r.Engine == "mongodb" {
+			method = recoveryserver.MongoValidation
 		}
 		if r.Validation == nil || r.Validation.Method != method || r.Validation.Objects < 0 {
 			return r, fmt.Errorf("missing recovery validation evidence")

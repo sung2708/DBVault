@@ -16,10 +16,15 @@ import (
 )
 
 type Job struct {
-	ID      string `json:"id"`
-	Cron    string `json:"cron"`
-	Config  string `json:"config"`
-	Enabled bool   `json:"enabled"`
+	BaseEvery         string `json:"base_every,omitempty"`
+	Cleanup           bool   `json:"cleanup,omitempty"`
+	Operation         string `json:"operation,omitempty"`
+	BackupType        string `json:"backup_type,omitempty"`
+	RecoveryDirectory string `json:"recovery_directory,omitempty"`
+	ID                string `json:"id"`
+	Cron              string `json:"cron"`
+	Config            string `json:"config"`
+	Enabled           bool   `json:"enabled"`
 }
 type State struct {
 	Version int   `json:"version"`
@@ -30,6 +35,27 @@ var identifier = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 var parser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 func Validate(j Job) error {
+	if j.Operation != "" && j.Operation != "backup" && j.Operation != "recovery" && j.Operation != "pitr" {
+		return fmt.Errorf("schedule operation must be backup, recovery or pitr")
+	}
+	if j.BaseEvery != "" {
+		d, err := time.ParseDuration(j.BaseEvery)
+		if err != nil || d < 0 || j.Operation != "pitr" {
+			return fmt.Errorf("base-every requires pitr and a nonnegative duration")
+		}
+	}
+	if j.Cleanup && j.Operation != "pitr" {
+		return fmt.Errorf("scheduled cleanup requires pitr")
+	}
+	if j.Operation != "recovery" && j.RecoveryDirectory != "" {
+		return fmt.Errorf("recovery directory requires a recovery schedule")
+	}
+	if j.BackupType != "" && j.BackupType != "full" && j.BackupType != "incremental" {
+		return fmt.Errorf("schedule backup type must be full or incremental")
+	}
+	if j.Operation == "recovery" && j.BackupType != "" {
+		return fmt.Errorf("recovery schedule cannot specify a backup type")
+	}
 	if !identifier.MatchString(j.ID) {
 		return fmt.Errorf("schedule ID must contain 1-64 letters, digits, underscores or hyphens")
 	}

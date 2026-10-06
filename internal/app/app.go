@@ -15,7 +15,10 @@ import (
 	"github.com/sung2708/DBVault/internal/compression"
 	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/database"
+	"github.com/sung2708/DBVault/internal/delta"
+	"github.com/sung2708/DBVault/internal/encryption"
 	"github.com/sung2708/DBVault/internal/fault"
+	"github.com/sung2708/DBVault/internal/keymanager"
 	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/notify"
 	"github.com/sung2708/DBVault/internal/pipeline"
@@ -68,6 +71,7 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 		if !dry {
 			eventManifest := operation.Manifest
 			eventManifest.Duration = s.now().Sub(notificationStart).Seconds()
+			s.recordOperation(ctx, "backup", notificationStart, eventManifest.Pipeline.Stored, resultErr)
 			s.notifyBackup(ctx, eventManifest, resultErr, operation.BackupStatus, operation.Verification)
 		}
 	}()
@@ -75,12 +79,97 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 	if s.DB == nil {
 		return operation, fault.Wrap(fault.Unsupported, "database adapter", fmt.Errorf("not implemented"))
 	}
-	if err := database.RequireBackup(s.DB, kind); err != nil {
+	if kind != "full" && kind != "incremental" {
+		return operation, fmt.Errorf("backup type must be full or incremental")
+	}
+	if err := database.RequireBackup(s.DB, "full"); err != nil {
 		return operation, err
 	}
 	info, err := s.Test(ctx)
 	if err != nil {
 		return operation, err
+	}
+	var encryptionKey []byte
+	var keyWrapper encryption.Wrapper
+	if s.Config.Encryption != nil {
+		if s.Config.Encryption.Providers[s.Config.Encryption.KeyID].Type != "" {
+			keyWrapper, err = keymanager.Resolve(ctx, s.Config.Encryption, s.Config.Encryption.KeyID)
+		} else {
+			encryptionKey, err = encryption.Key(s.Config.Encryption.Keys[s.Config.Encryption.KeyID])
+		}
+		if err != nil {
+			return operation, err
+		}
+	}
+	var base metadata.Manifest
+	defer clear(encryptionKey)
+	var baseFile *os.File
+	var current *os.File
+	var deltaMetadata *metadata.Delta
+	if kind == "incremental" && !dry {
+		release, e := s.chainLock(ctx)
+		if e != nil {
+			return operation, e
+		}
+		defer release()
+		base, e = s.latestBase(ctx)
+		if e != nil {
+			return operation, e
+		}
+		if base.Delta != nil && base.Delta.Depth >= 32 {
+			return operation, fmt.Errorf("incremental chain limit reached; create a full backup")
+		}
+		s.stage("backup.base", "start")
+		baseFile, e = s.materialize(ctx, base.Name, 0)
+		if e != nil {
+			return operation, e
+		}
+		defer removeTemp(baseFile)
+		s.stage("backup.base", "complete")
+		if !dry {
+			current, e = os.CreateTemp("", "dbvault-current-*")
+			if e != nil {
+				return operation, e
+			}
+			defer removeTemp(current)
+			s.stage("backup.dump", "start")
+			if e = s.DB.Dump(ctx, current); e != nil {
+				return operation, e
+			}
+			if _, e = current.Seek(0, io.SeekStart); e != nil {
+				return operation, e
+			}
+			h, n, e := pipeline.Hash(ctx, current, io.Discard)
+			if e != nil {
+				return operation, fmt.Errorf("read current dump: %w", e)
+			}
+			if n == 0 {
+				return operation, fmt.Errorf("native dump produced no data")
+			}
+			if _, e = current.Seek(0, io.SeekStart); e != nil {
+				return operation, e
+			}
+			s.stage("backup.dump", "complete")
+			depth := 1
+			if base.Delta != nil {
+				depth = base.Delta.Depth + 1
+			}
+			deltaMetadata = &metadata.Delta{BaseName: base.Name, BaseID: base.ID, BaseHash: base.Checksum.Hash, RawHash: h, Depth: depth}
+		}
+	}
+	if dry && kind == "incremental" {
+		base, e := s.latestBase(ctx)
+		if e != nil {
+			return operation, e
+		}
+		if base.Delta != nil && base.Delta.Depth >= 32 {
+			return operation, fmt.Errorf("incremental chain limit reached; create a full backup")
+		}
+		bf, e := s.materialize(ctx, base.Name, 0)
+		if e != nil {
+			return operation, e
+		}
+		removeTemp(bf)
 	}
 	if dry {
 		operation.BackupStatus = "not_created"
@@ -90,11 +179,31 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 	if err != nil {
 		return operation, err
 	}
-	start := s.now()
-	id, key, err := metadata.Identity(s.Config.Database.Database, s.DB.Extension()+c.Extension(), start)
+	start := notificationStart
+	extension := s.DB.Extension() + c.Extension()
+	if kind == "incremental" {
+		extension = ".delta" + c.Extension()
+	}
+	if encryptionKey != nil || keyWrapper != nil {
+		extension += ".enc"
+	}
+	id, key, err := metadata.Identity(s.Config.Database.Database, extension, start)
 	if err != nil {
 		return operation, err
 	}
+	complete := start
+	m = metadata.Manifest{Version: "1.0", ID: id, Name: key, BackupType: kind, CreatedAt: start, CompletedAt: complete, Database: metadata.Database{Engine: s.DB.Name(), Version: info.ServerVersion, Name: s.Config.Database.Database, Format: s.DB.Format()}, Pipeline: metadata.Pipeline{Compression: s.Config.Compression.Type, Level: s.Config.Compression.Level, Raw: 0, Stored: 0}, Checksum: metadata.Checksum{Algorithm: "sha256", Hash: ""}, Duration: complete.Sub(start).Seconds(), Status: "completed", ApplicationVersion: s.Version, ToolVersion: info.ToolVersion, Storage: s.Config.Storage.Type}
+	m.Delta = deltaMetadata
+	if encryptionKey != nil || keyWrapper != nil {
+		m.Encryption = &metadata.Encryption{Algorithm: encryption.Algorithm, KeyID: s.Config.Encryption.KeyID}
+		if keyWrapper != nil {
+			m.Encryption.Algorithm = encryption.ManagedAlgorithm
+		}
+	}
+	m.Database.IncludeTables = append([]string(nil), s.Config.Database.Options.IncludeTables...)
+	m.Database.ExcludeTables = append([]string(nil), s.Config.Database.Options.ExcludeTables...)
+	m.Database.IncludeCollections = append([]string(nil), s.Config.Database.Options.IncludeCollections...)
+	m.Database.ExcludeCollections = append([]string(nil), s.Config.Database.Options.ExcludeCollections...)
 	s.log("backup started", "backup_id", id, "operation", "backup", "database_type", s.DB.Name(), "database_name", s.Config.Database.Database, "storage", s.Config.Storage.Type, "compression", s.Config.Compression.Type)
 	s.stage("backup.stream", "start")
 	pipeR, pipeW := io.Pipe()
@@ -107,15 +216,35 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 	go func() {
 		// The checksum writer sits after compression; native output is counted first.
 		h := newHashWriter(pipeW)
-		cw, e := c.Compress(h)
+		var destination io.Writer = h
+		var encrypted *encryption.Writer
+		var e error
+		if keyWrapper != nil {
+			encrypted, e = encryption.NewManagedWriter(child, h, keyWrapper, encryptionContext(m))
+			destination = encrypted
+		} else if encryptionKey != nil {
+			encrypted, e = encryption.NewWriter(h, encryptionKey, encryptionContext(m))
+			destination = encrypted
+		}
+		var cw io.WriteCloser
+		if e == nil {
+			cw, e = c.Compress(destination)
+		}
 		if e == nil {
 			count := &pipeline.Counter{Writer: cw}
-			e = s.DB.Dump(child, count)
-			raw = count.N
+			if current != nil {
+				raw, e = delta.Encode(count, pipeline.Reader{Context: child, Source: current}, baseFile)
+			} else {
+				e = s.DB.Dump(child, count)
+				raw = count.N
+			}
 			closeErr := cw.Close()
 			if e == nil {
 				e = closeErr
 			}
+		}
+		if e == nil && encrypted != nil {
+			e = encrypted.Close()
 		}
 		digest = h.digest()
 		stored = h.N
@@ -148,12 +277,12 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 
 	}
 	s.stage("backup.stream", "complete")
-	complete := s.now()
-	m = metadata.Manifest{Version: "1.0", ID: id, Name: key, BackupType: kind, CreatedAt: start, CompletedAt: complete, Database: metadata.Database{Engine: s.DB.Name(), Version: info.ServerVersion, Name: s.Config.Database.Database, Format: s.DB.Format()}, Pipeline: metadata.Pipeline{Compression: s.Config.Compression.Type, Level: s.Config.Compression.Level, Raw: raw, Stored: stored}, Checksum: metadata.Checksum{Algorithm: "sha256", Hash: digest}, Duration: complete.Sub(start).Seconds(), Status: "completed", ApplicationVersion: s.Version, ToolVersion: info.ToolVersion, Storage: s.Config.Storage.Type}
-	m.Database.IncludeTables = append([]string(nil), s.Config.Database.Options.IncludeTables...)
-	m.Database.ExcludeTables = append([]string(nil), s.Config.Database.Options.ExcludeTables...)
-	m.Database.IncludeCollections = append([]string(nil), s.Config.Database.Options.IncludeCollections...)
-	m.Database.ExcludeCollections = append([]string(nil), s.Config.Database.Options.ExcludeCollections...)
+	complete = s.now()
+	m.CompletedAt = complete
+	m.Duration = complete.Sub(start).Seconds()
+	m.Pipeline.Raw = raw
+	m.Pipeline.Stored = stored
+	m.Checksum.Hash = digest
 	s.stage("backup.register", "start")
 	b, err := metadata.Encode(m)
 	if err == nil {
@@ -266,6 +395,11 @@ func (s *Service) restore(ctx context.Context, key string, confirm, dry bool, o 
 	if m.Database.Engine != s.DB.Name() || m.Database.Format != s.DB.Format() {
 		return fault.Wrap(fault.Unsupported, "restore compatibility", fmt.Errorf("backup engine or format differs from configured adapter"))
 	}
+	payload, err := s.materializeSnapshot(ctx, m, f, 0)
+	if err != nil {
+		return err
+	}
+	defer removeTemp(payload)
 	if prepare != nil {
 		if err := prepare(ctx, m); err != nil {
 			return err
@@ -287,15 +421,7 @@ func (s *Service) restore(ctx context.Context, key string, confirm, dry bool, o 
 			return err
 		}
 	}
-	c, err := compression.New(m.Pipeline.Compression, m.Pipeline.Level)
-	if err != nil {
-		return err
-	}
-	r, err := c.Decompress(pipeline.Reader{Context: ctx, Source: f})
-	if err != nil {
-		return fault.Wrap(fault.Integrity, "decompress artifact", err)
-	}
-	defer r.Close()
+	r := pipeline.Reader{Context: ctx, Source: payload}
 	// Feed a pipe so all decompression errors and trailer checks propagate even
 	// when a native process exits early. Cancel and close both ends on failure.
 	child, cancel := context.WithCancel(ctx)
@@ -410,6 +536,22 @@ func (s *Service) Delete(ctx context.Context, key string, confirm, dry bool) err
 		return err
 	}
 	s.emit(Event{Stage: "manifest", State: "complete", Manifest: m})
+	if !dry {
+		release, err := s.chainLock(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+	items, err := s.List(ctx, "")
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Delta != nil && item.Delta.BaseName == key {
+			return fmt.Errorf("backup is required by incremental child %s", item.Name)
+		}
+	}
 	if dry {
 		s.stage("delete.preview", "complete")
 		return nil

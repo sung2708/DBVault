@@ -17,6 +17,8 @@ var stages = map[string][2]string{
 	"configuration":         {"Loading configuration", "Configuration loaded"},
 	"preflight":             {"Checking database connectivity and tools", "Database connection and tools verified"},
 	"backup.stream":         {"Creating, compressing and storing backup", "Backup stream stored"},
+	"backup.base":           {"Verifying and reconstructing the base backup", "Base backup is ready"},
+	"backup.dump":           {"Creating the current database snapshot", "Database snapshot is ready"},
 	"backup.register":       {"Registering completed backup", "Backup metadata registered"},
 	"manifest":              {"Reading backup metadata", "Backup metadata valid"},
 	"verify":                {"Verifying stored size and SHA-256", "Stored size and SHA-256 verified"},

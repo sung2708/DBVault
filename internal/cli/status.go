@@ -89,7 +89,7 @@ func matchingStatusSchedules(state schedule.State, configPath string) ([]app.Hea
 			matches = strings.EqualFold(path, abs)
 		}
 		if matches {
-			result = append(result, app.HealthSchedule{ID: job.ID, Cron: job.Cron, Enabled: job.Enabled})
+			result = append(result, app.HealthSchedule{ID: job.ID, Cron: job.Cron, Enabled: job.Enabled, Operation: job.Operation})
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })

@@ -36,3 +36,36 @@ func TestSelection(t *testing.T) {
 		t.Fatal("invalid manifest accepted")
 	}
 }
+
+func TestIncrementalCleanupOrderAndProtection(t *testing.T) {
+	now := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
+	base := backup("a-base", "a", now.Add(-72*time.Hour))
+	child := backup("b-child", "a", now.Add(-48*time.Hour))
+	child.BackupType = "incremental"
+	child.Delta = &metadata.Delta{BaseName: base.Name, BaseID: base.ID, BaseHash: base.Checksum.Hash, RawHash: base.Checksum.Hash, Depth: 1}
+	leaf := backup("c-leaf", "a", now.Add(-24*time.Hour))
+	leaf.BackupType = "incremental"
+	leaf.Delta = &metadata.Delta{BaseName: child.Name, BaseID: child.ID, BaseHash: child.Checksum.Hash, RawHash: child.Checksum.Hash, Depth: 2}
+	items := []metadata.Manifest{base, leaf, child}
+	selected, err := Select(items, config.Retention{KeepCount: 1}, now)
+	if err != nil || len(selected) != 0 {
+		t.Fatalf("retained leaf lost ancestors: %v, %v", selected, err)
+	}
+	items = append(items, backup("new-full", "a", now))
+	selected, err = Select(items, config.Retention{KeepCount: 1}, now)
+	if err != nil || len(selected) != 3 {
+		t.Fatalf("obsolete chain not selected: %v, %v", selected, err)
+	}
+	for i, want := range []string{leaf.Name, child.Name, base.Name} {
+		if selected[i].Name != want {
+			t.Fatalf("position %d: got %s, want %s", i, selected[i].Name, want)
+		}
+	}
+	// Corrupt dependency cycles must abort selection before any deletion.
+	base.BackupType = "incremental"
+	base.Delta = &metadata.Delta{BaseName: leaf.Name, BaseID: leaf.ID, BaseHash: leaf.Checksum.Hash, RawHash: leaf.Checksum.Hash, Depth: 3}
+	items[0] = base
+	if _, err := Select(items, config.Retention{KeepCount: 1}, now); err == nil {
+		t.Fatal("cyclic obsolete chain accepted")
+	}
+}

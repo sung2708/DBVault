@@ -111,7 +111,7 @@ func TestActionableInputErrors(t *testing.T) {
 		{[]string{"backup", "--timeout", "secret-invalid-value"}, "a duration", "dbvault backup --help"},
 		{[]string{"list", "--limit", "secret-invalid-value"}, "an integer", "dbvault list --help"},
 		{[]string{"list", "--json=secret-invalid-value"}, "true or false", "dbvault list --help"},
-		{[]string{"backup", "--type", "incremental"}, "only full", "dbvault backup --help"},
+		{[]string{"backup", "--type", "differential"}, "full or incremental", "dbvault backup --help"},
 		{[]string{"backup", "--storage", "s3"}, "unknown flag", "dbvault backup --help"},
 		{[]string{"list", "--output", "xml"}, "--output must be text or json", "dbvault list --help"},
 	}
@@ -146,7 +146,7 @@ func TestHelpDefaultsAndDestructiveBehavior(t *testing.T) {
 		required  []string
 		forbidden []string
 	}{
-		{"backup", []string{"unset: configuration", "only full", "--dry-run"}, []string{`default "gzip"`}},
+		{"backup", []string{"unset: configuration", "incremental", "--dry-run"}, []string{`default "gzip"`}},
 		{"restore", []string{"--target <backup-name>", "--confirm", "--dry-run", "overwrite", "PostgreSQL/MongoDB"}, nil},
 		{"delete", []string{"--confirm", "--dry-run", "Permanently"}, nil},
 		{"cleanup", []string{"immediately", "no confirmation flag", "newest", "--dry-run"}, []string{"--confirm"}},

@@ -4,13 +4,11 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sung2708/DBVault/internal/app"
-	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/metadata"
 )
 
@@ -59,9 +57,8 @@ func assertBackupHealth(t *testing.T, ctx context.Context, s *app.Service, m met
 	s.Config = previousConfig
 	if s.Config.Database.Type == "mysql" || s.Config.Database.Type == "mongodb" {
 		r, err := s.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: filepath.Join(t.TempDir(), "isolated.sqlite"), Confirm: true})
-		var typed *fault.Error
-		if !errors.As(err, &typed) || typed.Kind != fault.Unsupported || r.TargetState != "not_created" || r.RecordKey != "" {
-			t.Fatalf("native drill did not fail closed: %+v %v", r, err)
+		if err == nil || r.TargetState != "not_created" || r.RecordKey != "" {
+			t.Fatalf("invalid server target was not rejected before creation: %+v %v", r, err)
 		}
 	}
 	t.Logf("health fresh/verified/boundary/stale/no-policy/no-backup passed: engine=%s storage=%s codec=%s", m.Database.Engine, s.Config.Storage.Type, m.Pipeline.Compression)

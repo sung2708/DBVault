@@ -18,6 +18,9 @@ compression:
 retention:
   keep_days: 30
   keep_count: 14
+health:
+  max_backup_age: 26h # Example daily SLA incl. dump duration/grace; set explicitly.
+  backup_scope: logical
 notifications:
   slack:
     enabled: false

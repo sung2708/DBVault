@@ -110,6 +110,7 @@ func TestMongoDBBackupDestroyRestore(t *testing.T) {
 			}
 			assertBackupHealth(t, ctx, svc, m)
 			if codec == "none" {
+				m = assertServerRecoveryUpgrade(t, ctx, svc, m)
 				assertNewRestoreWorkflow(t, ctx, svc, m)
 			}
 			if e = client.Database("source").Drop(ctx); e != nil {

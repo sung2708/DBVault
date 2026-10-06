@@ -4,7 +4,9 @@ This document provides technical specifications for database adapters in DBVault
 
 The current binary implements PostgreSQL, Oracle MySQL 8.x, MongoDB and SQLite.
 Full and selected PostgreSQL
-logical dumps are implemented; incremental/differential/PITR are unsupported.
+logical dumps are implemented. Native log increments/PITR use the separate
+[`pitr` command family](pitr.md). Native differential backups are
+unsupported; the application supports [logical dump delta chains](enhancements.md).
 See [verified status](implementation-status.md) for executed restore-test evidence.
 
 ---
@@ -13,10 +15,10 @@ See [verified status](implementation-status.md) for executed restore-test eviden
 
 | Engine | Status | Native Tool(s) | Full Backup | Full Restore | Selective (Tables) | Incremental Strategy |
 |---|:---:|---|:---:|:---:|:---:|---|
-| **PostgreSQL** | Implemented | `pg_dump`, `psql`, `pg_restore` | Yes | Yes | Yes | Unsupported |
-| **MySQL** | Implemented | `mysqldump`, `mysql` | Yes (InnoDB) | Yes | Backup only | Unsupported |
-| **MongoDB** | Implemented | `mongodump`, `mongorestore` 100.x | Full | Full | One collection or excludes | Unsupported |
-| **SQLite** | Implemented | Embedded modernc SQLite | Full | Full | Unsupported | Unsupported |
+| **PostgreSQL** | Implemented | `pg_dump`, `psql`, `pg_restore`, `pg_basebackup` | Yes | Yes | Yes | Logical deltas; native WAL via `pitr` |
+| **MySQL** | Implemented | `mysqldump`, `mysql`, `mysqlbinlog` | Yes (InnoDB) | Yes | Backup only | Logical deltas; native binlogs via `pitr` |
+| **MongoDB** | Implemented | `mongodump`, `mongorestore` 100.x | Full | Full | One collection or excludes | Logical deltas; native oplog via `pitr` |
+| **SQLite** | Implemented | Embedded modernc SQLite | Full | Full | Unsupported | Logical deltas |
 
 ---
 

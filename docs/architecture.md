@@ -1,5 +1,8 @@
 # DBVault System Architecture
 
+For client-side encryption, logical incremental chains, all-engine isolated
+recovery drills, metrics and recurring recovery jobs, see [operator instructions](enhancements.md).
+
 This document describes the architectural principles, component structure, data flow, and dependency boundaries of DBVault.
 
 ## Current implementation contract
