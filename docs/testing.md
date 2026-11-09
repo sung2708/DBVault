@@ -249,8 +249,9 @@ psql -h 127.0.0.1 -U postgres -d testdb -c "SELECT COUNT(*) FROM items;"
 # Expected count: 1000
 ```
 
-CI and release integration jobs use Ubuntu 24.04 to keep MongoDB 8.0 fixtures
-on a compatible host kernel. MongoDB 8.0 refuses to start on Linux kernels
+CI and release integration jobs temporarily use Ubuntu 22.04 with a Linux 6.8
+host kernel for the MongoDB 8.0 fixtures. Move back to a newer runner once its
+host kernel is compatible. MongoDB 8.0 refuses to start on Linux kernels
 6.19 through 7.0.13, including when it runs inside Docker.
 See the [MongoDB 8.0 release notes](https://www.mongodb.com/docs/manual/release-notes/8.0/).
 
