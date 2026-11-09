@@ -70,8 +70,8 @@ Phase 1 delivered an end-to-end backup and restore workflow for PostgreSQL to lo
 - [x] **Local Container Packaging:** Four non-root runtime targets for PostgreSQL, MySQL, MongoDB and SQLite; builds and version/native-client checks executed locally.
 - [x] **Container release workflow (`v0.4.0`):** Versioned GHCR images for four
   runtime targets, Linux amd64/arm64, published after intentional release tags.
-- [ ] **First official container publication:** Execute the prepared workflow on
-  the `v0.4.0` release workflow and verify registry access.
+- [ ] **Published image validation:** Pull published GHCR and Docker Hub images by
+  digest and smoke-test both Linux architectures.
 - [x] **In-Process Scheduler:** Five-field cron, persistent CRUD, timezones, overlap prevention and cancellation.
 
 ---

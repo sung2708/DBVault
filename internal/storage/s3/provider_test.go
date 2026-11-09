@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -111,5 +112,35 @@ func TestCancellationAbortsWithFreshContext(t *testing.T) {
 	}
 	if aborts.Load() != 1 {
 		t.Fatal("cancelled upload was not aborted", aborts.Load())
+	}
+}
+func TestProtectedDeletes(t *testing.T) {
+	var deletes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || (r.URL.Path != "/bucket/dbvault_chain.lock" && r.URL.Path != "/bucket/dbvault_pitr.lock") {
+			t.Errorf("unexpected S3 request %s %s", r.Method, r.URL.Path)
+		}
+		deletes.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	client := sdk.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""), HTTPClient: server.Client()}, func(o *sdk.Options) {
+		o.BaseEndpoint = aws.String(server.URL)
+		o.UsePathStyle = true
+	})
+	provider := Provider{Client: client, Bucket: "bucket", ProtectDeletes: true}
+	for _, key := range []string{"backup", "backup.meta.json", "backup.pitr.json"} {
+		err := provider.Delete(context.Background(), key)
+		if err == nil || !strings.Contains(err.Error(), "storage.s3.protect_deletes") {
+			t.Fatalf("Delete(%q) = %v", key, err)
+		}
+	}
+	for _, key := range []string{"dbvault_chain.lock", "dbvault_pitr.lock"} {
+		if err := provider.Delete(context.Background(), key); err != nil {
+			t.Fatalf("Delete(%q) = %v", key, err)
+		}
+	}
+	if got := deletes.Load(); got != 2 {
+		t.Fatalf("sent %d S3 delete requests, want 2", got)
 	}
 }

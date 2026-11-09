@@ -43,6 +43,15 @@ func TestScheduledRecoveryAndMetricsEndpoint(t *testing.T) {
 	if err = root.Execute(); err != nil {
 		t.Fatal(err)
 	}
+	root = New(Build{}, &out, &stderr)
+	root.SetArgs([]string{"cleanup", "--config", cfg, "--json"})
+	if err = root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := filepath.Glob(filepath.Join(dir, "backups", "verification_*.json"))
+	if err != nil || len(evidence) != 0 {
+		t.Fatalf("cleanup with no candidates wrote evidence: %v (%v)", evidence, err)
+	}
 	state := filepath.Join(dir, "jobs.json")
 	root = New(Build{}, &out, &stderr)
 	root.SetArgs([]string{"schedule", "add", "--id", "drill", "--cron", "0 3 * * *", "--config", cfg, "--operation", "recovery", "--recovery-dir", recovery, "--state", state})
@@ -97,7 +106,10 @@ func TestScheduledRecoveryAndMetricsEndpoint(t *testing.T) {
 	for time.Now().Before(deadline) {
 		response, err = client.Get("http://" + address + "/metrics")
 		if err == nil {
-			break
+			if response.StatusCode == http.StatusOK {
+				break
+			}
+			response.Body.Close()
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -106,8 +118,23 @@ func TestScheduledRecoveryAndMetricsEndpoint(t *testing.T) {
 	}
 	data, err := io.ReadAll(response.Body)
 	response.Body.Close()
-	if err != nil || response.StatusCode != 200 || !strings.Contains(string(data), `operation="recovery",status="success"} 1`) {
+	if err != nil || response.StatusCode != 200 || !strings.Contains(string(data), `operation="recovery",status="success"} 1`) || !strings.Contains(string(data), "dbvault_metrics_snapshot_age_seconds") {
 		t.Fatal(string(data), err)
+	}
+	records, err := filepath.Glob(filepath.Join(dir, "backups", "operation_*.json"))
+	if err != nil || len(records) == 0 {
+		t.Fatalf("missing operation records: %v", err)
+	}
+	if err := os.WriteFile(records[0], []byte("invalid record"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	response, err = client.Get("http://" + address + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("scrape reread storage: HTTP %d", response.StatusCode)
 	}
 	cancel()
 	select {

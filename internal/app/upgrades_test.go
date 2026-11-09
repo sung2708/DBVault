@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/sung2708/DBVault/internal/database"
 	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/retention"
+	"github.com/sung2708/DBVault/internal/storage"
 )
 
 func TestEncryptedIncrementalRestoreAndRetention(t *testing.T) {
@@ -165,8 +167,54 @@ func TestIncrementalLockAndDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer release()
+	defer func() {
+		var releaseErr error
+		release(&releaseErr)
+		if releaseErr != nil {
+			t.Error(releaseErr)
+		}
+	}()
 	if _, err = s.Backup(ctx, "incremental", false); err == nil {
 		t.Fatal("concurrent chain writer accepted")
+	}
+}
+
+type denyLogicalLockRelease struct {
+	storage.Provider
+	err error
+}
+
+func (s denyLogicalLockRelease) Delete(ctx context.Context, key string) error {
+	if key == "dbvault_chain.lock" {
+		return s.err
+	}
+	return s.Provider.Delete(ctx, key)
+}
+
+func TestLogicalCatalogVerificationAndLockRelease(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := setup(t, "gzip")
+	if _, err := s.Backup(ctx, "full", false); err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("delete denied")
+	s.Store = denyLogicalLockRelease{Provider: s.Store, err: denied}
+	increment, err := s.Backup(ctx, "incremental", false)
+	if !errors.Is(err, denied) || !strings.Contains(err.Error(), "release dbvault_chain.lock") {
+		t.Fatalf("incremental error = %v", err)
+	}
+	items, err := s.List(ctx, "")
+	if err != nil || len(items) != 2 {
+		t.Fatal(items, err)
+	}
+	if err := s.VerifyCatalog(ctx, items); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := s.Store.List(ctx, "verification_")
+	if err != nil || len(evidence) != len(items) {
+		t.Fatalf("verification records = %d, error = %v", len(evidence), err)
+	}
+	if err := s.VerifyCatalog(ctx, []metadata.Manifest{increment}); err == nil {
+		t.Fatal("missing base accepted")
 	}
 }

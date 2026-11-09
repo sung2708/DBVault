@@ -3,6 +3,8 @@ package pitr
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/sung2708/DBVault/internal/config"
 	runner "github.com/sung2708/DBVault/internal/exec"
+	"github.com/sung2708/DBVault/internal/storage"
 	"github.com/sung2708/DBVault/internal/storage/local"
 )
 
@@ -216,7 +219,11 @@ func TestNativeCleanupVerificationPreviewAndLock(t *testing.T) {
 	if _, err = svc.Cleanup(ctx, now, false); err == nil {
 		t.Fatal("cleanup ignored lock")
 	}
-	release()
+	err = nil
+	release(&err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Corruption of the retained recovery point must prevent all deletion.
 	if err = store.Delete(ctx, latest.Name); err != nil {
 		t.Fatal(err)
@@ -240,18 +247,129 @@ func TestNativeCleanupVerificationPreviewAndLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A prior release may have deleted a payload before its manifest.
+	if err = store.Delete(ctx, child.Name); err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("interrupted payload deletion")
+	svc.Store = failDeleteKey{Provider: store, key: old.Name, err: denied}
+	if _, err = svc.Cleanup(ctx, now, false); !errors.Is(err, denied) {
+		t.Fatalf("cleanup error = %v", err)
+	}
+	for _, m := range []Record{child, old} {
+		if exists, err := store.Exists(ctx, m.Name+".pitr.json"); err != nil || exists {
+			t.Fatalf("expired manifest still registered: %s (%v)", m.Name, err)
+		}
+	}
+	svc.Store = store
 	got, err = svc.Cleanup(ctx, now, false)
-	if err != nil || len(got) != 2 {
+	if err != nil || len(got) != 0 {
 		t.Fatal(got, err)
 	}
-	for _, m := range got {
-		for _, name := range []string{m.Name, m.Name + ".pitr.json"} {
-			if ok, _ := store.Exists(ctx, name); ok {
-				t.Fatal("expired object remains", name)
-			}
-		}
+	if exists, err := store.Exists(ctx, old.Name); err != nil || !exists {
+		t.Fatalf("expected only an unregistered payload after interruption: %v", err)
 	}
 	if ok, _ := store.Exists(ctx, "dbvault_pitr.lock"); ok {
 		t.Fatal("native lock leaked")
+	}
+}
+
+type lockDeleteFailure struct {
+	storage.Provider
+	err error
+}
+
+func (s lockDeleteFailure) Delete(context.Context, string) error {
+	return s.err
+}
+
+func TestCleanupReportsLockReleaseFailure(t *testing.T) {
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	denied := errors.New("delete denied")
+	svc := Service{Store: lockDeleteFailure{Provider: store, err: denied}}
+	_, err = svc.Cleanup(context.Background(), time.Now(), true)
+	if !errors.Is(err, denied) || !strings.Contains(err.Error(), "release dbvault_pitr.lock") {
+		t.Fatalf("cleanup error = %v", err)
+	}
+}
+
+func TestLockReleasePreservesOperationError(t *testing.T) {
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	denied := errors.New("delete denied")
+	svc := Service{Store: lockDeleteFailure{Provider: store, err: denied}}
+	release, err := svc.lock(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := errors.New("operation failed")
+	err = original
+	release(&err)
+	if !errors.Is(err, original) || !errors.Is(err, denied) {
+		t.Fatalf("combined error = %v", err)
+	}
+}
+
+func TestProtectedCleanupRefusesBeforeStorageAccess(t *testing.T) {
+	svc := Service{Config: config.Config{Storage: config.Storage{
+		Type: "s3", S3: config.S3{ProtectDeletes: true},
+	}}}
+	_, err := svc.Cleanup(context.Background(), time.Now(), false)
+	if err == nil || !strings.Contains(err.Error(), "storage.s3.protect_deletes") {
+		t.Fatalf("cleanup error = %v", err)
+	}
+}
+
+type failDeleteKey struct {
+	storage.Provider
+	key string
+	err error
+}
+
+func (s failDeleteKey) Delete(ctx context.Context, key string) error {
+	if key == s.key {
+		return s.err
+	}
+	return s.Provider.Delete(ctx, key)
+}
+
+func TestCaptureRejectsAppendAtChainLimit(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := local.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := Service{Store: store}
+	now := time.Now().UTC()
+	var tail Record
+	for i := 1; i <= maxChainRecords; i++ {
+		var parent *Record
+		if i > 1 {
+			parent = &tail
+		}
+		tail = retentionRecord(i, now.Add(time.Duration(i)*time.Second), parent)
+		data, err := json.Marshal(tail)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, tail.Name+".pitr.json"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chain, err := svc.chain(ctx, tail.Name)
+	if err != nil || len(chain) != maxChainRecords {
+		t.Fatalf("longest chain length = %d, error = %v", len(chain), err)
+	}
+	if _, err := svc.Capture(ctx, tail.Name); err == nil || !strings.Contains(err.Error(), "PITR chain limit reached") {
+		t.Fatalf("capture error = %v", err)
 	}
 }

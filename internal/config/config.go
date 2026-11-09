@@ -45,15 +45,24 @@ type Storage struct {
 	GCS   GCS    `yaml:"gcs"`
 	Azure Azure  `yaml:"azure"`
 }
+
+func (s Storage) CheckDelete() error {
+	if s.Type == "s3" && s.S3.ProtectDeletes {
+		return fmt.Errorf("S3 deletion disabled by storage.s3.protect_deletes")
+	}
+	return nil
+}
+
 type S3 struct {
-	Bucket       string `yaml:"bucket"`
-	Region       string `yaml:"region"`
-	Prefix       string `yaml:"prefix"`
-	Endpoint     string `yaml:"endpoint"`
-	AccessKeyEnv string `yaml:"access_key_env"`
-	SecretKeyEnv string `yaml:"secret_key_env"`
-	Encryption   string `yaml:"encryption"`
-	KMSKeyID     string `yaml:"kms_key_id"`
+	ProtectDeletes bool   `yaml:"protect_deletes,omitempty"`
+	Bucket         string `yaml:"bucket"`
+	Region         string `yaml:"region"`
+	Prefix         string `yaml:"prefix"`
+	Endpoint       string `yaml:"endpoint"`
+	AccessKeyEnv   string `yaml:"access_key_env"`
+	SecretKeyEnv   string `yaml:"secret_key_env"`
+	Encryption     string `yaml:"encryption"`
+	KMSKeyID       string `yaml:"kms_key_id"`
 }
 type GCS struct {
 	Bucket             string `yaml:"bucket"`

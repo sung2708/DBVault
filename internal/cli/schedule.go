@@ -109,6 +109,11 @@ func (o *options) scheduleCommand() *cobra.Command {
 				if e != nil {
 					return e
 				}
+				if cleanup {
+					if err := cfg.Storage.CheckDelete(); err != nil {
+						return fmt.Errorf("--cleanup: %w", err)
+					}
+				}
 				if operation == "recovery" {
 					if !confirmRecovery {
 						return fmt.Errorf("--confirm is required to authorize recurring recovery drills")

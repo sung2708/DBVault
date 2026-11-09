@@ -95,7 +95,7 @@ including all baselines tied at that timestamp.
 Age uses the newest range's coverage end, so an active chain is retained in full.
 Both zero disables deletion. Superseded whole chains are deleted child-first;
 branches of a retained baseline are also retained. Rotate baselines regularly
-to let storage expire. Cleanup verifies all archives, including retained ones,
+to let storage expire. Cleanup verifies all retained archives and any expired archives still present
 before deleting data. Corruption or missing parents aborts deletion.
 
 `pitr backup --cleanup` applies retention after publishing a successful backup.
@@ -174,3 +174,11 @@ explicit `health.source_identity`; see [independent monitoring](independent-moni
 - [PostgreSQL continuous archiving and PITR](https://www.postgresql.org/docs/16/continuous-archiving.html)
 - [MySQL binary log backup](https://dev.mysql.com/doc/refman/8.4/en/mysqlbinlog-backup.html)
 - [MongoDB mongorestore oplog options](https://www.mongodb.com/docs/database-tools/mongorestore/)
+
+
+A native chain supports up to 1,024 records including the baseline. Set
+`--base-every` to refresh the baseline before the limit. An interrupted cleanup
+may leave an unregistered archive behind. Verify that its manifest is absent
+and no restore is in progress before removing it through your storage operator.
+A subsequent cleanup can remove a legacy dangling manifest only if the chain
+is already eligible for expiry and retained archives pass verification.

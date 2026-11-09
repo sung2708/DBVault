@@ -53,6 +53,11 @@ func (o *options) pitrCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if op == "backup" && cleanup {
+				if err := cfg.Storage.CheckDelete(); err != nil {
+					return fmt.Errorf("--cleanup: %w", err)
+				}
+			}
 			store, closeStore, err := providers.Open(ctx, cfg.Storage)
 			if err != nil {
 				return err

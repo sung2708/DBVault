@@ -46,7 +46,7 @@ func (s *Service) recordOperation(ctx context.Context, op string, start time.Tim
 // Metrics reads durable operation records. Counters cover this feature's records,
 // not historical runs made before records existed. Scrapes never open archives.
 func (s *Service) Metrics(ctx context.Context) (string, error) {
-	objects, err := s.Store.List(ctx, "")
+	objects, err := s.Store.List(ctx, "operation_")
 	if err != nil {
 		return "", err
 	}

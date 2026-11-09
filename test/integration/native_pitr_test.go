@@ -15,7 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/sung2708/DBVault/internal/config"
+	"github.com/sung2708/DBVault/internal/encryption"
 	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/pitr"
 	"github.com/sung2708/DBVault/internal/security"
@@ -25,9 +30,29 @@ import (
 // Build a Linux binary before running this Docker-only fixture and point
 // DBVAULT_NATIVE_BINARY at it. This exercises the public CLI and vendor tools.
 func TestNativePITRDocker(t *testing.T) {
+	bucket := os.Getenv("DBVAULT_LIVE_S3_BUCKET")
+	checkRetention := os.Getenv("DBVAULT_LIVE_OBJECT_LOCK") == "1"
+	if checkRetention && bucket == "" {
+		t.Fatal("DBVAULT_LIVE_OBJECT_LOCK requires DBVAULT_LIVE_S3_BUCKET")
+	}
 	binary := os.Getenv("DBVAULT_NATIVE_BINARY")
 	if binary == "" {
+		if bucket != "" {
+			t.Fatal("live S3 requires DBVAULT_NATIVE_BINARY")
+		}
 		t.Skip("DBVAULT_NATIVE_BINARY is required for native Linux CLI fixture")
+	}
+	awsEnv := map[string]string{}
+	if bucket != "" {
+		for _, name := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"} {
+			if value := os.Getenv(name); value != "" {
+				awsEnv[name] = value
+			}
+		}
+		if awsEnv["AWS_ACCESS_KEY_ID"] == "" || awsEnv["AWS_SECRET_ACCESS_KEY"] == "" ||
+			os.Getenv("DBVAULT_LIVE_AWS_REGION") == "" || os.Getenv("DBVAULT_LIVE_KMS_KEY") == "" {
+			t.Fatal("live S3 requires AWS credentials, DBVAULT_LIVE_AWS_REGION and DBVAULT_LIVE_KMS_KEY")
+		}
 	}
 	binary, e := filepath.Abs(binary)
 	if e != nil {
@@ -37,12 +62,19 @@ func TestNativePITRDocker(t *testing.T) {
 	defer cancel()
 	secret := "native-integration-test-password"
 	native := runner.Native{Redactor: security.New(secret)}
+	for _, value := range awsEnv {
+		native.Redactor = native.Redactor.With(value)
+	}
 	t.Setenv("NATIVE_PASS", secret)
 	t.Setenv("NATIVE_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	network := fmt.Sprintf("dbvault-native-%d", time.Now().UnixNano())
 	run := func(args []string) (string, error) {
 		var out bytes.Buffer
-		e := native.Run(ctx, runner.Spec{Executable: "docker", Args: args, Env: map[string]string{"NATIVE_PASS": secret, "NATIVE_KEY": os.Getenv("NATIVE_KEY"), "POSTGRES_PASSWORD": secret, "MYSQL_ROOT_PASSWORD": secret, "MYSQL_PWD": secret}, Stdout: &out})
+		env := map[string]string{"NATIVE_PASS": secret, "NATIVE_KEY": os.Getenv("NATIVE_KEY"), "POSTGRES_PASSWORD": secret, "MYSQL_ROOT_PASSWORD": secret, "MYSQL_PWD": secret}
+		for name, value := range awsEnv {
+			env[name] = value
+		}
+		e := native.Run(ctx, runner.Spec{Executable: "docker", Args: args, Env: env, Stdout: &out})
 		return strings.TrimSpace(out.String()), e
 	}
 	must := func(args ...string) string {
@@ -60,6 +92,9 @@ func TestNativePITRDocker(t *testing.T) {
 		native.Run(cleanup, runner.Spec{Executable: "docker", Args: []string{"network", "rm", network}, Stdout: io.Discard})
 	})
 	for _, variant := range []string{"mysql", "mysql-gtid", "mongodb", "postgres"} {
+		if bucket != "" && variant != "postgres" {
+			continue
+		}
 		t.Run(variant, func(t *testing.T) {
 			engine := variant
 			gtid := variant == "mysql-gtid"
@@ -211,13 +246,27 @@ func TestNativePITRDocker(t *testing.T) {
 				}
 				must("cp", filepath.Join(work, name), source+":/work/"+name)
 			}
+			if bucket != "" {
+				region := os.Getenv("DBVAULT_LIVE_AWS_REGION")
+				cfg.Storage = config.Storage{Type: "s3", S3: config.S3{
+					Bucket: bucket, Region: region, Prefix: network, ProtectDeletes: true,
+				}}
+				cfg.Encryption = &config.Encryption{KeyID: "live-kms", Providers: map[string]config.ManagedKey{
+					"live-kms": {Type: "aws-kms", Key: os.Getenv("DBVAULT_LIVE_KMS_KEY"), Region: region},
+				}}
+				t.Logf("live test leaves synthetic backup objects under %s/", network)
+			}
 			save("source.yaml", cfg)
 			cli := func(args ...string) (string, error) {
 				toolImage := image
 				if engine == "mysql" {
 					toolImage = "dbvault:native-mysql-tools"
 				}
-				command := []string{"run", "--rm", "--network", network, "--volume", mount, "--volume", binary + ":/usr/local/bin/dbvault:ro", "--env", "NATIVE_PASS", "--env", "NATIVE_KEY", "--entrypoint", "/usr/local/bin/dbvault", toolImage, "--config", "/work/source.yaml", "--json", "pitr"}
+				command := []string{"run", "--rm", "--network", network, "--volume", mount, "--volume", binary + ":/usr/local/bin/dbvault:ro", "--env", "NATIVE_PASS", "--env", "NATIVE_KEY"}
+				for name := range awsEnv {
+					command = append(command, "--env", name)
+				}
+				command = append(command, "--entrypoint", "/usr/local/bin/dbvault", toolImage, "--config", "/work/source.yaml", "--json", "pitr")
 				return run(append(command, args...))
 			}
 			data, e := cli("backup", "--type", "incremental")
@@ -248,7 +297,11 @@ func TestNativePITRDocker(t *testing.T) {
 			insert(3)
 			var capture pitr.Record
 			waitNative(func() error {
-				data, e := cli("backup", "--type", "incremental", "--cleanup")
+				args := []string{"backup", "--type", "incremental"}
+				if bucket == "" {
+					args = append(args, "--cleanup")
+				}
+				data, e := cli(args...)
 				if e != nil {
 					return e
 				}
@@ -257,11 +310,41 @@ func TestNativePITRDocker(t *testing.T) {
 			if capture.Kind != "logs" || capture.Parent != base.Name {
 				t.Fatal("native capture mismatch")
 			}
+			if bucket != "" {
+				for _, record := range []pitr.Record{base, capture} {
+					if record.Algorithm != encryption.ManagedAlgorithm || record.KeyID != cfg.Encryption.KeyID {
+						t.Fatalf("expected a KMS-encrypted %s record", record.Kind)
+					}
+				}
+			}
+			if checkRetention {
+				awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
+					awsconfig.WithRegion(cfg.Storage.S3.Region),
+					awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+						awsEnv["AWS_ACCESS_KEY_ID"], awsEnv["AWS_SECRET_ACCESS_KEY"], awsEnv["AWS_SESSION_TOKEN"])))
+				if err != nil {
+					t.Fatal(native.Redactor.Error(err))
+				}
+				client := s3.NewFromConfig(awsCfg)
+				for _, name := range []string{base.Name, base.Name + ".pitr.json", capture.Name, capture.Name + ".pitr.json"} {
+					out, err := client.GetObjectRetention(ctx, &s3.GetObjectRetentionInput{
+						Bucket: aws.String(bucket), Key: aws.String(network + "/" + name),
+					})
+					if err != nil {
+						t.Fatalf("read retention for %s: %v", name, native.Redactor.Error(err))
+					}
+					if out.Retention == nil || out.Retention.Mode == "" || !aws.ToTime(out.Retention.RetainUntilDate).After(time.Now()) {
+						t.Fatalf("%s has no active Object Lock retention", name)
+					}
+				}
+				t.Log("Object Lock retention verified on both archives and manifests")
+			}
 			// Refuse out-of-range time before creating or mutating a target.
 			if _, e = cli("restore", "--target", capture.Name, "--time", at.Add(24*time.Hour).Format(time.RFC3339), "--directory", "/work/refused", "--confirm"); e == nil {
 				t.Fatal("uncaptured time accepted")
 			}
 			if engine == "postgres" {
+				restoreStarted := time.Now()
 				data, e = cli("restore", "--target", capture.Name, "--time", at.Format(time.RFC3339), "--directory", "/work/recovered", "--confirm")
 				if e != nil {
 					t.Fatal(e)
@@ -277,6 +360,7 @@ func TestNativePITRDocker(t *testing.T) {
 					}
 					return nil
 				})
+				t.Logf("PostgreSQL reached the recovery target in %s", time.Since(restoreStarted))
 			} else {
 				args := []string{"run", "--detach", "--tty", "--name", target, "--network", network}
 				if engine == "mysql" {
@@ -336,7 +420,7 @@ func TestNativePITRDocker(t *testing.T) {
 			if e != nil || sourceCount != "3" {
 				t.Fatalf("source mutated: %q %v", sourceCount, e)
 			}
-			t.Logf("%s restored before exclusive target %s; base=%d bytes, logs=%d bytes", engine, at.Format(time.RFC3339), base.Size, capture.Size)
+			t.Logf("%s restored before exclusive target %s; base=%d bytes, logs=%d bytes; archived through %s", engine, at.Format(time.RFC3339), base.Size, capture.Size, capture.Until.Format(time.RFC3339))
 		})
 	}
 }

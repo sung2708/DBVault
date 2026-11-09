@@ -395,10 +395,12 @@ func (s *Service) unpack(ctx context.Context, m Record, dir string) error {
 	return nil
 }
 
+const maxChainRecords = 1024
+
 func (s *Service) chain(ctx context.Context, name string) ([]Record, error) {
 	var records []Record
 	seen := map[string]bool{}
-	for len(records) < 1024 {
+	for len(records) < maxChainRecords {
 		if seen[name] {
 			return nil, fmt.Errorf("cyclic PITR chain")
 		}

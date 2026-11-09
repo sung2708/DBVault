@@ -22,6 +22,7 @@ type Provider struct {
 	Namespace            storage.Namespace
 	Encryption, KMSKeyID string
 	PartSize             int64
+	ProtectDeletes       bool
 }
 
 func (p *Provider) Put(ctx context.Context, key string, r io.Reader, size int64) error {
@@ -106,6 +107,10 @@ func (p *Provider) Exists(ctx context.Context, key string) (bool, error) {
 	return err == nil, err
 }
 func (p *Provider) Delete(ctx context.Context, key string) error {
+	// Object Lock permits delete markers; keep backup objects visible while releasing operation locks.
+	if p.ProtectDeletes && key != "dbvault_chain.lock" && key != "dbvault_pitr.lock" {
+		return errors.New("S3 deletion disabled by storage.s3.protect_deletes")
+	}
 	object, err := p.Namespace.Object(key)
 	if err != nil {
 		return err

@@ -213,6 +213,7 @@ notifications:
 | `storage.s3.bucket` | string | Conditional | None | — | Destination S3 bucket name. |
 | `storage.s3.region` | string | Conditional | None | — | AWS region. |
 | `storage.s3.prefix` | string | No | `""` | — | Normalized object prefix. |
+| `storage.s3.protect_deletes` | bool | No | `false` | — | Refuse backup object and manifest deletion while allowing internal operation locks to be released. |
 | `storage.s3.endpoint` | string | No | `""` | — | Explicit S3-compatible endpoint. |
 
 ---

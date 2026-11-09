@@ -16,15 +16,12 @@
 
 ## Current Project Status
 
-Version `v0.6.0` adds client-side AES-256-GCM encryption with key rotation,
-logical dump incremental chains, MySQL/MongoDB isolated recovery drills,
-Prometheus metrics and scheduled recovery jobs. It also adds native WAL/binlog/oplog
-capture and PITR, plus AWS KMS/Vault Transit key providers. See
-[configuration and usage](docs/enhancements.md), [native PITR](docs/pitr.md) and
-[managed keys](docs/managed-keys.md).
-It includes native scheduling/retention and independent storage-only freshness
-monitoring, including PITR coverage. See [independent monitoring](docs/independent-monitoring.md).
-Release assets become available after the tag-triggered release workflow succeeds.
+Version `v0.7.0` adds opt-in [S3 deletion protection](docs/storage.md#s3-object-lock),
+safer native PITR retention and a background snapshot for Prometheus metrics.
+It retains native WAL/binlog/oplog recovery, managed encryption keys, scheduled
+recovery drills and [independent monitoring](docs/independent-monitoring.md).
+The AWS live verification fixture is available, and live S3/KMS/Object Lock
+verification is pending. See the [verification procedure](docs/testing.md#release-verification-on-aws).
 
 ### Start here
 
@@ -45,10 +42,9 @@ running `doctor`. Configure `health.max_backup_age` and enable
 `protection.verify_after_backup` for recorded integrity checks. For recovery testing,
 see [recovery drills](docs/cli-reference.md#dbvault-recovery-drill).
 
-Release `v0.6.0` includes the earlier restore workflows, history and exports.
 Downloads and versioned GHCR images become available after the release workflow
 succeeds. Install this release with
-`go install github.com/sung2708/DBVault/cmd/dbvault@v0.6.0`.
+`go install github.com/sung2708/DBVault/cmd/dbvault@v0.7.0`.
 See the [changelog](CHANGELOG.md).
 
 Restore can create a destination
@@ -341,6 +337,10 @@ from YAML, with documented environment and CLI overrides.
 ---
 
 ## Quick Start
+
+Give each logical backup source its own storage prefix or local directory,
+including when two servers use the same database name.
+See [logical source isolation](docs/storage.md#isolate-logical-backup-sources).
 
 ### Guided Setup
 
@@ -714,7 +714,7 @@ Explore the complete technical documentation:
 ## Roadmap Summary
 
 - **Implemented:** Four engines/providers, compression, integrity, retention, Slack and persistent cron schedules, with database and emulator restore drills.
-- **Future work:** Native retention/scheduling, cross-timeline physical recovery and live-cloud deployment validation.
+- **Future work:** Cross-timeline physical recovery and live-cloud deployment validation. Native scheduling and retention are available since v0.6.0.
 - **Release tooling:** Docker packaging, CI and release workflows build cross-platform binaries and checksums.
 - **Release work:** Publish reviewed tags/images after live operational validation.
 

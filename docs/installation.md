@@ -1,10 +1,10 @@
 # Installation Guide
 
-Version `v0.6.0` includes native PITR, managed encryption keys, native scheduling
-and independent freshness monitoring. Install the version explicitly with:
+Version `v0.7.0` includes opt-in S3 deletion protection, safer PITR retention
+and background metrics refresh. Install the version explicitly with:
 
 ```bash
-go install github.com/sung2708/DBVault/cmd/dbvault@v0.6.0
+go install github.com/sung2708/DBVault/cmd/dbvault@v0.7.0
 ```
 
 Binary/container assets become available after the release workflow succeeds.

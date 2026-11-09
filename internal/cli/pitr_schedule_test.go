@@ -43,3 +43,41 @@ func TestNativeScheduleCLIAndExecutionRoute(t *testing.T) {
 		t.Fatal("credential exposed")
 	}
 }
+
+func TestProtectedNativeBackupRejectsCleanupBeforeBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.yaml")
+	text := `version: "1"
+database:
+  type: postgres
+  database: app
+  user: operator
+  password_env: NATIVE_MISSING_PASSWORD
+storage:
+  type: s3
+  s3:
+    bucket: example
+    region: us-east-1
+    protect_deletes: true
+pitr: {}
+`
+	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	root := New(Build{}, &out, &stderr)
+	root.SetArgs([]string{"pitr", "backup", "--cleanup", "--config", path})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--cleanup: S3 deletion disabled") {
+		t.Fatalf("backup error = %v", err)
+	}
+	state := filepath.Join(t.TempDir(), "jobs.json")
+	root = New(Build{}, &out, &stderr)
+	root.SetArgs([]string{"schedule", "add", "--id", "native", "--operation", "pitr", "--cleanup", "--cron", "*/5 * * * *", "--config", path, "--state", state})
+	err = root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--cleanup: S3 deletion disabled") {
+		t.Fatalf("schedule error = %v", err)
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatalf("invalid job wrote state: %v", err)
+	}
+}

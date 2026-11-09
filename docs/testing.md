@@ -248,3 +248,38 @@ dbvault restore --config test-config.yaml --target ./backups/testdb_latest.sql.g
 psql -h 127.0.0.1 -U postgres -d testdb -c "SELECT COUNT(*) FROM items;"
 # Expected count: 1000
 ```
+
+## Release verification on AWS
+
+Use a dedicated test bucket and symmetric KMS key in the same region. Export
+short-lived AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+and `AWS_SESSION_TOKEN` when required). Grant list/read/write access to test
+prefixes matching `dbvault-native-*`, delete access for the two operation locks,
+and `kms:Encrypt`/`kms:Decrypt` on the test key. The fixture writes synthetic
+data to a new prefix on each run and leaves the objects there for inspection.
+
+```bash
+fixture_dir="$(mktemp -d)"
+CGO_ENABLED=0 GOOS=linux GOARCH="$(go env GOARCH)" go build -o "$fixture_dir/dbvault" ./cmd/dbvault
+DBVAULT_NATIVE_BINARY="$fixture_dir/dbvault" \
+DBVAULT_LIVE_S3_BUCKET=test-bucket \
+DBVAULT_LIVE_AWS_REGION=us-east-1 \
+DBVAULT_LIVE_KMS_KEY=arn:aws:kms:us-east-1:ACCOUNT:key/KEY_ID \
+go test -count=1 -tags=integration -run '^TestNativePITRDocker/postgres$' -v ./test/integration
+```
+
+The fixture checks an exclusive recovery timestamp, compares restored row IDs
+against the source, and logs the time until PostgreSQL reaches the recovery
+target. For Object Lock sign-off, use a bucket with default retention, grant
+`s3:GetObjectRetention` on the test prefix, and set
+`DBVAULT_LIVE_OBJECT_LOCK=1`. That mode fails unless both archives and their
+manifests have active retention. Without it, the test verifies S3/KMS recovery.
+Remove test objects and versions through the bucket operator once their
+retention expires.
+
+For release sign-off, also restore with a role that can read S3 but lacks
+`kms:Decrypt`. Confirm the failure leaves the requested recovery directory
+absent. Create and verify an encrypted backup with the published v0.6.0 binary,
+then verify and restore that same backup with the candidate. Check the saved
+schedule list with both binaries and smoke-test candidate images by digest on
+Linux amd64 and arm64.

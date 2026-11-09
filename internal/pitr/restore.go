@@ -28,7 +28,7 @@ type RestoreResult struct {
 // Restore uses an exclusive fresh directory for PostgreSQL, and an independently
 // authenticated empty instance for logical MySQL/MongoDB replay. All archives are
 // authenticated before the destination receives any database writes.
-func (s *Service) Restore(ctx context.Context, name string, at time.Time, directory string, target *config.Config, confirm bool) (RestoreResult, error) {
+func (s *Service) Restore(ctx context.Context, name string, at time.Time, directory string, target *config.Config, confirm bool) (_ RestoreResult, err error) {
 	result := RestoreResult{TargetTime: at, State: "not_started"}
 	if !confirm {
 		return result, fmt.Errorf("native PITR restore requires --confirm")
@@ -40,7 +40,7 @@ func (s *Service) Restore(ctx context.Context, name string, at time.Time, direct
 	if err != nil {
 		return result, err
 	}
-	defer release()
+	defer release(&err)
 	at = at.UTC()
 	result.TargetTime = at
 	chain, e := s.chain(ctx, name)

@@ -152,3 +152,9 @@ supervised independently of the producer.
 Publication/cleanup between storage reads can transiently fail a check; retry
 and deduplicate in the monitoring platform rather than treating missing evidence
 as success. Live cloud IAM and actual alert delivery require deployment validation.
+
+
+For logical backups, point each monitor at the storage prefix or local
+directory dedicated to its source. Two servers with the same database engine
+and name need separate prefixes so a fresh backup from one cannot satisfy
+the other's freshness check. See [source isolation](storage.md#isolate-logical-backup-sources).

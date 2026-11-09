@@ -134,3 +134,37 @@ latency, bandwidth and possible egress costs. The verifier uses streamed stored
 bytes and the manifest SHA-256; provider ETags are not treated as SHA-256. Local
 storage also reopens and hashes the stored file instead of trusting only the
 digest calculated during upload.
+
+### S3 Object Lock
+
+Configure default retention on a dedicated Object Lock bucket, and set
+`storage.s3.protect_deletes: true` in every DBVault config using the protected
+prefix. This blocks deletion of backup objects and their manifests, including
+cleanup and rollback deletes. Omit `--cleanup` from protected native backup
+schedules. Standalone cleanup supports `--dry-run` for previews. An interrupted
+publication can therefore leave
+orphaned objects for the bucket operator to review.
+
+Allow the DBVault role to call `s3:DeleteObject` only for
+`dbvault_chain.lock` and `dbvault_pitr.lock` under the configured prefix. Keep
+`s3:DeleteObjectVersion` and governance bypass outside that role. The application
+setting complements the IAM policy. Object Lock protects versions, and a
+versionless delete can still hide a protected version behind a delete marker.
+Keep automatic current-version expiration away from recoverable chains. Review
+the whole chain before expiring its archives and manifests.
+
+See [S3 Object Lock delete behavior](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html).
+
+
+### Isolate logical backup sources
+
+Give each logical source its own cloud prefix or local backup directory. For
+example, put `prod-east/app` and `prod-west/app` in different prefixes even
+if both run PostgreSQL and have a database named `app`. Logical manifests from
+existing releases identify the database by engine and name. Sharing a prefix
+can mix incremental parents, health results and retention across sources.
+
+For a prefix already shared by multiple sources, start each source with a new
+full backup in its dedicated prefix. Keep the old prefix available for restores
+and pause its automated cleanup until each source has verified its new backup.
+Use the same dedicated prefix in the corresponding monitor profile.

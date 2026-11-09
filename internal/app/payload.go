@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,16 +28,16 @@ func removeTemp(f *os.File) {
 
 // chainLock serializes incremental publication with deletion across CLI processes.
 // A crashed owner leaves the lock for operator inspection; never steal a live lock.
-func (s *Service) chainLock(ctx context.Context) (func(), error) {
+func (s *Service) chainLock(ctx context.Context) (func(*error), error) {
 	const key = "dbvault_chain.lock"
 	if err := s.Store.Put(ctx, key, bytes.NewReader([]byte("DBVault chain operation in progress\n")), -1); err != nil {
 		return nil, fmt.Errorf("backup chain locked or storage unavailable (inspect dbvault_chain.lock after a crashed operation): %w", err)
 	}
-	return func() {
+	return func(operationErr *error) {
 		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		if err := s.Store.Delete(c, key); err != nil && s.Logger != nil {
-			s.Logger.Warn("backup chain lock could not be released; inspect dbvault_chain.lock before the next chain operation")
+		if err := s.Store.Delete(c, key); err != nil {
+			*operationErr = errors.Join(*operationErr, fmt.Errorf("release %s: %w", key, err))
 		}
 	}, nil
 }
@@ -83,6 +84,30 @@ func (s *Service) VerifyChain(ctx context.Context, key string) error {
 		return err
 	}
 	return s.dependencyChain(ctx, m, true)
+}
+
+// VerifyCatalog verifies each archive once before cleanup and checks every dependency.
+func (s *Service) VerifyCatalog(ctx context.Context, items []metadata.Manifest) error {
+	verified := make(map[string]metadata.Manifest, len(items))
+	for _, item := range items {
+		m, err := s.Verify(ctx, item.Name)
+		if err != nil {
+			return err
+		}
+		verified[m.Name] = m
+	}
+	for _, m := range verified {
+		if m.Delta != nil {
+			base, ok := verified[m.Delta.BaseName]
+			if !ok {
+				return fmt.Errorf("incremental base artifact is missing")
+			}
+			if err := validateBase(m, base); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // dependencyChain validates metadata and artifact existence/size without

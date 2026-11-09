@@ -3,6 +3,7 @@ package pitr
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -13,21 +14,23 @@ import (
 
 // Storage publication is exclusive across processes, including restore readers.
 // Never steal a lock left by a crashed owner; operators inspect it first.
-func (s *Service) lock(ctx context.Context) (func(), error) {
+func (s *Service) lock(ctx context.Context) (func(*error), error) {
 	const key = "dbvault_pitr.lock"
 	if err := s.Store.Put(ctx, key, bytes.NewReader([]byte("DBVault native chain operation in progress\n")), -1); err != nil {
 		return nil, fmt.Errorf("native chain locked or storage unavailable; inspect dbvault_pitr.lock after a crashed operation: %w", err)
 	}
-	return func() {
+	return func(operationErr *error) {
 		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		_ = s.Store.Delete(c, key)
+		if err := s.Store.Delete(c, key); err != nil {
+			*operationErr = errors.Join(*operationErr, fmt.Errorf("release %s: %w", key, err))
+		}
 	}, nil
 }
 
 // Backup starts a baseline when none exists, otherwise captures from the newest
 // chain belonging to the authenticated source. Errors never silently reset it.
-func (s *Service) Backup(ctx context.Context, kind string, baseEvery time.Duration) (Record, error) {
+func (s *Service) Backup(ctx context.Context, kind string, baseEvery time.Duration) (_ Record, err error) {
 	if s.Config.PITR == nil || (s.Config.Database.Type != "postgres" && s.Config.Database.Type != "mysql" && s.Config.Database.Type != "mongodb") {
 		return Record{}, fmt.Errorf("native backup requires pitr configuration and PostgreSQL, MySQL or MongoDB")
 	}
@@ -41,7 +44,7 @@ func (s *Service) Backup(ctx context.Context, kind string, baseEvery time.Durati
 	if err != nil {
 		return Record{}, err
 	}
-	defer release()
+	defer release(&err)
 	if kind == "full" {
 		return s.base(ctx)
 	}
@@ -134,7 +137,7 @@ func SelectCleanup(items []Record, policy config.Retention, now time.Time) ([]Re
 	state := map[string]int{}
 	var visit func(string, int) error
 	visit = func(name string, n int) error {
-		if n >= 1024 || state[name] == 1 {
+		if n >= maxChainRecords || state[name] == 1 {
 			return fmt.Errorf("cyclic or oversized native chain; cleanup aborted")
 		}
 		if state[name] == 2 {
@@ -156,7 +159,7 @@ func SelectCleanup(items []Record, policy config.Retention, now time.Time) ([]Re
 				return fmt.Errorf("native continuity mismatch; cleanup aborted")
 			}
 			root[name], depth[name] = root[m.Parent], depth[m.Parent]+1
-			if depth[name] >= 1024 {
+			if depth[name] >= maxChainRecords {
 				return fmt.Errorf("oversized native chain; cleanup aborted")
 			}
 		}
@@ -211,14 +214,19 @@ func SelectCleanup(items []Record, policy config.Retention, now time.Time) ([]Re
 	return result, nil
 }
 
-// Cleanup verifies every retained and expired archive before deleting any data.
+// Cleanup verifies every retained and available expired archive before deleting any data.
 // Dry runs validate the entire dependency graph and never delete archives.
-func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) ([]Record, error) {
+func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Record, err error) {
+	if !dry {
+		if err := s.Config.Storage.CheckDelete(); err != nil {
+			return nil, err
+		}
+	}
 	release, err := s.lock(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	defer release(&err)
 	items, err := s.List(ctx)
 	if err != nil {
 		return nil, err
@@ -227,7 +235,22 @@ func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) ([]Recor
 	if err != nil || dry || len(candidates) == 0 {
 		return candidates, err
 	}
+	expired := make(map[string]bool, len(candidates))
+	missing := make(map[string]bool)
+	for _, m := range candidates {
+		expired[m.Name] = true
+	}
 	for _, m := range items {
+		if expired[m.Name] {
+			exists, err := s.Store.Exists(ctx, m.Name)
+			if err != nil {
+				return nil, err
+			}
+			if !exists {
+				missing[m.Name] = true
+				continue
+			}
+		}
 		dir, e := os.MkdirTemp("", "dbvault-native-retention-*")
 		if e != nil {
 			return nil, e
@@ -242,11 +265,13 @@ func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) ([]Recor
 		}
 	}
 	for _, m := range candidates {
-		if err = s.Store.Delete(ctx, m.Name); err != nil {
-			return nil, err
-		}
 		if err = s.Store.Delete(ctx, m.Name+".pitr.json"); err != nil {
 			return nil, err
+		}
+		if !missing[m.Name] {
+			if err = s.Store.Delete(ctx, m.Name); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return candidates, nil

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -47,21 +48,48 @@ func (o *options) metricsCommand() *cobra.Command {
 				return err
 			}
 			defer listener.Close()
+			type snapshot struct {
+				text string
+				at   time.Time
+			}
+			var cached atomic.Pointer[snapshot]
+			refreshCtx, stopRefresh := context.WithCancel(c.Context())
+			refreshDone := make(chan struct{})
+			defer func() {
+				stopRefresh()
+				<-refreshDone
+			}()
+			go func() {
+				defer close(refreshDone)
+				// shortcut: refresh still scans retained history, aggregate records if refresh latency grows too large.
+				for refreshCtx.Err() == nil {
+					started := time.Now()
+					text, err := svc.Metrics(refreshCtx)
+					if err == nil {
+						cached.Store(&snapshot{text: text, at: started})
+					}
+					select {
+					case <-refreshCtx.Done():
+						return
+					case <-time.After(time.Minute):
+					}
+				}
+			}()
 			mux := http.NewServeMux()
 			mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
 					w.WriteHeader(http.StatusMethodNotAllowed)
 					return
 				}
-				ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-				defer cancel()
-				text, err := svc.Metrics(ctx)
-				if err != nil {
+				current := cached.Load()
+				if current == nil {
 					http.Error(w, "metrics unavailable", http.StatusServiceUnavailable)
 					return
 				}
 				w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-				fmt.Fprint(w, text)
+				fmt.Fprint(w, current.text)
+				fmt.Fprint(w, "# HELP dbvault_metrics_snapshot_age_seconds Age of the last successful metrics snapshot.\n# TYPE dbvault_metrics_snapshot_age_seconds gauge\n")
+				fmt.Fprintf(w, "dbvault_metrics_snapshot_age_seconds %g\n", time.Since(current.at).Seconds())
 			})
 			server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: time.Minute}
 			done := make(chan error, 1)

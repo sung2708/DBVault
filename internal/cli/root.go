@@ -402,6 +402,11 @@ func (o *options) run(c *cobra.Command, name string) error {
 		}
 		return o.output(c, items)
 	case "cleanup":
+		if !dry {
+			if err := cfg.Storage.CheckDelete(); err != nil {
+				return err
+			}
+		}
 		display.Step("cleanup.select")
 		items, err := svc.List(ctx, "")
 		if err != nil {
@@ -412,17 +417,13 @@ func (o *options) run(c *cobra.Command, name string) error {
 			return err
 		}
 		display.Done("cleanup.select")
-		if !dry {
-			if len(candidates) > 0 {
-				display.Warning(fmt.Sprintf("Cleanup will delete %d backups immediately; no confirmation flag is required.", len(candidates)))
-			}
+		if !dry && len(candidates) > 0 {
+			display.Warning(fmt.Sprintf("Cleanup will delete %d backups immediately; no confirmation flag is required.", len(candidates)))
 			// Verify protected backups as well: cleanup cannot rely on corrupt newest
 			// artifacts as the only recovery point.
 			display.Step("cleanup.verify")
-			for _, m := range items {
-				if err := svc.VerifyChain(ctx, m.Name); err != nil {
-					return err
-				}
+			if err := svc.VerifyCatalog(ctx, items); err != nil {
+				return err
 			}
 			display.Done("cleanup.verify")
 			display.Step("cleanup.delete")

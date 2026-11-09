@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-11-09
+
+### Added
+- Opt-in `storage.s3.protect_deletes` to keep backups and manifests visible
+  on Object Lock buckets while allowing DBVault operation locks to be released.
+- Opt-in PostgreSQL PITR verification fixture against AWS S3 and KMS.
+
+### Fixed
+- Stop native capture at the supported chain limit and make interrupted native
+  cleanup safe to retry. Logical cleanup verifies each archive once per run.
+- Reject destructive cleanup when saving protected S3 schedules, and surface
+  storage lock release failures.
+- Serve metrics HTTP requests from a background snapshot with a freshness gauge.
+
+### Changed
+- Give each logical source a dedicated storage prefix or directory. Existing
+  manifests remain readable. See [source isolation](docs/storage.md#isolate-logical-backup-sources).
+- Omit `--cleanup` from backup jobs targeting protected S3 prefixes. Use dry-run
+  cleanup to preview candidates.
+
+Live AWS S3/KMS/Object Lock recovery remains unverified. See the
+[verification procedure](docs/testing.md#release-verification-on-aws).
+
 ## [v0.6.0] - 2026-10-06
 
 ### Added

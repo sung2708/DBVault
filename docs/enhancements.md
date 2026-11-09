@@ -179,8 +179,12 @@ It is disabled by default to avoid extra storage writes. Records contain no
 error strings or credentials. Recording errors are logged and do not change the
 backup/drill result. Counters cover recorded runs only and depend on retained
 `operation_*.json` objects; deleting records resets that portion of the totals.
-Metric reads currently scan records and manifests; large installations should
-consider scrape frequency and cloud request costs.
+The HTTP endpoint serves the last successful snapshot. One background worker
+refreshes it after startup and waits one minute between scans. It returns 503
+until the first successful refresh. Alert on
+`dbvault_metrics_snapshot_age_seconds` to detect a stuck or failing refresh.
+Each refresh still scans retained records and manifests. The one-shot
+`metrics` command reads storage directly.
 
 Metrics include `dbvault_operations_total`,
 `dbvault_operation_duration_seconds_sum`, `dbvault_backup_bytes_total`,

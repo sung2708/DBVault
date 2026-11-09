@@ -111,7 +111,7 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 		if e != nil {
 			return operation, e
 		}
-		defer release()
+		defer release(&resultErr)
 		base, e = s.latestBase(ctx)
 		if e != nil {
 			return operation, e
@@ -526,9 +526,14 @@ func (s *Service) List(ctx context.Context, prefix string) ([]metadata.Manifest,
 	})
 	return result, nil
 }
-func (s *Service) Delete(ctx context.Context, key string, confirm, dry bool) error {
+func (s *Service) Delete(ctx context.Context, key string, confirm, dry bool) (resultErr error) {
 	if !confirm && !dry {
 		return fmt.Errorf("must specify --confirm for deletion")
+	}
+	if !dry {
+		if err := s.Config.Storage.CheckDelete(); err != nil {
+			return err
+		}
 	}
 	s.stage("manifest", "start")
 	m, err := s.ReadManifest(ctx, key)
@@ -541,7 +546,7 @@ func (s *Service) Delete(ctx context.Context, key string, confirm, dry bool) err
 		if err != nil {
 			return err
 		}
-		defer release()
+		defer release(&resultErr)
 	}
 	items, err := s.List(ctx, "")
 	if err != nil {

@@ -165,12 +165,12 @@ func (s *Service) requireTools(ctx context.Context, base bool) error {
 	return nil
 }
 
-func (s *Service) Base(ctx context.Context) (Record, error) {
+func (s *Service) Base(ctx context.Context) (_ Record, err error) {
 	release, err := s.lock(ctx)
 	if err != nil {
 		return Record{}, err
 	}
-	defer release()
+	defer release(&err)
 	return s.base(ctx)
 }
 
@@ -288,12 +288,12 @@ func (s *Service) base(ctx context.Context) (Record, error) {
 	return s.publish(ctx, m, dir)
 }
 
-func (s *Service) Capture(ctx context.Context, parent string) (Record, error) {
+func (s *Service) Capture(ctx context.Context, parent string) (_ Record, err error) {
 	release, err := s.lock(ctx)
 	if err != nil {
 		return Record{}, err
 	}
-	defer release()
+	defer release(&err)
 	return s.capture(ctx, parent)
 }
 
@@ -301,6 +301,9 @@ func (s *Service) capture(ctx context.Context, parent string) (Record, error) {
 	chain, e := s.chain(ctx, parent)
 	if e != nil {
 		return Record{}, e
+	}
+	if len(chain) >= maxChainRecords {
+		return Record{}, fmt.Errorf("PITR chain limit reached; create a new base")
 	}
 	last := chain[len(chain)-1]
 	if last.Engine != s.Config.Database.Type {
