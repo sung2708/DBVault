@@ -1,10 +1,11 @@
 # Installation Guide
 
-Version `v0.7.0` includes opt-in S3 deletion protection, safer PITR retention
-and background metrics refresh. Install the version explicitly with:
+Version `v0.8.0` reduces temporary disk use for unencrypted logical restores
+and improves recovery from interrupted backup publication and deletion.
+Install this version explicitly:
 
 ```bash
-go install github.com/sung2708/DBVault/cmd/dbvault@v0.7.0
+go install github.com/sung2708/DBVault/cmd/dbvault@v0.8.0
 ```
 
 Binary/container assets become available after the release workflow succeeds.

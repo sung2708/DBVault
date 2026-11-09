@@ -42,8 +42,9 @@ Both queries should print `hello DBVault`. For PostgreSQL and other engines, see
 
 ## Current Project Status
 
-Version `v0.7.0` adds opt-in [S3 deletion protection](docs/storage.md#s3-object-lock),
-safer native PITR retention and a background snapshot for Prometheus metrics.
+Version `v0.8.0` reduces temporary disk use for unencrypted logical restores,
+preserves archives when manifest publication is uncertain, and retries interrupted
+backup deletions. See the [PostgreSQL restore baseline](docs/testing.md#postgresql-local-restore-baseline-for-v080).
 It retains native WAL/binlog/oplog recovery, managed encryption keys, scheduled
 recovery drills and [independent monitoring](docs/independent-monitoring.md).
 The AWS live verification fixture is available, and live S3/KMS/Object Lock
@@ -51,7 +52,7 @@ verification is pending. See the [verification procedure](docs/testing.md#releas
 
 Downloads and versioned GHCR images become available after the release workflow
 succeeds. Install this release with
-`go install github.com/sung2708/DBVault/cmd/dbvault@v0.7.0`.
+`go install github.com/sung2708/DBVault/cmd/dbvault@v0.8.0`.
 See the [changelog](CHANGELOG.md).
 
 Restore can create a destination

@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-11-09
+
 ### Changed
+- Add a SQLite backup and restore quickstart.
+- Cancel superseded pull request CI runs and keep the installed CLI smoke test offline.
 - Use the verified snapshot directly when decompressing unencrypted logical
   backups, saving one stored-artifact-sized temporary copy during restore.
 
