@@ -7,7 +7,8 @@ permissions:
   contents: read
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    # MongoDB 8.0 rejects Linux kernels 6.19 through 7.0.13.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

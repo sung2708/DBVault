@@ -66,7 +66,8 @@ jobs:
           cache-from: type=gha,scope=image-${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=image-${{ matrix.target }}
   validate:
-    runs-on: ubuntu-latest
+    # MongoDB 8.0 rejects Linux kernels 6.19 through 7.0.13.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
