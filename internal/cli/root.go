@@ -403,7 +403,7 @@ func (o *options) run(c *cobra.Command, name string) error {
 		return o.output(c, items)
 	case "cleanup":
 		if !dry {
-			if err := cfg.Storage.CheckDelete(); err != nil {
+			if err := svc.ResumeDeletes(ctx); err != nil {
 				return err
 			}
 		}

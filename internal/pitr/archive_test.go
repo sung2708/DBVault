@@ -43,7 +43,7 @@ func TestNativeEncryptedArchiveAndContinuity(t *testing.T) {
 		t.Fatal(chain, e)
 	}
 	dest := t.TempDir()
-	if e = svc.unpack(context.Background(), base, dest); e != nil {
+	if e = svc.unpack(context.Background(), base, dest, false); e != nil {
 		t.Fatal(e)
 	}
 	data, _ := os.ReadFile(filepath.Join(dest, "base.sql"))
@@ -53,8 +53,15 @@ func TestNativeEncryptedArchiveAndContinuity(t *testing.T) {
 	if info, err := os.Stat(filepath.Join(dest, "empty")); err != nil || !info.IsDir() {
 		t.Fatal("empty native directory was lost", err)
 	}
+	validationDir := t.TempDir()
+	if e = svc.unpack(context.Background(), base, validationDir, true); e != nil {
+		t.Fatal(e)
+	}
+	if info, err := os.Stat(filepath.Join(validationDir, "base.sql")); err != nil || info.Size() != 0 {
+		t.Fatal("validation wrote the extracted payload", err)
+	}
 	base.Identity = "changed"
-	if e = svc.unpack(context.Background(), base, t.TempDir()); e == nil {
+	if e = svc.unpack(context.Background(), base, t.TempDir(), true); e == nil {
 		t.Fatal("archive binding mismatch accepted")
 	}
 	for _, name := range []string{"../file", "pitr_fake.tar", ""} {

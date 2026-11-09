@@ -52,7 +52,6 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.ref_name }}-${{ matrix.suffix }}
             sungp2708/dbvault:${{ github.ref_name }}-${{ matrix.target }}
-            sungp2708/dbvault:${{ matrix.target }}
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
@@ -65,6 +64,39 @@ jobs:
           sbom: true
           cache-from: type=gha,scope=image-${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=image-${{ matrix.target }}
+  dockerhub-aliases:
+    needs: images
+    runs-on: ubuntu-latest
+    concurrency:
+      group: dockerhub-release-aliases
+      queue: max
+    steps:
+      - name: Check whether this is the latest stable release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          latest="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)"
+          if [[ "$latest" == "$GITHUB_REF_NAME" ]]; then
+            echo "promote=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@v4
+        if: steps.latest.outputs.promote == 'true'
+      - uses: docker/login-action@v3
+        if: steps.latest.outputs.promote == 'true'
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Promote versioned images
+        if: steps.latest.outputs.promote == 'true'
+        run: |
+          for engine in postgres mysql mongodb sqlite; do
+            docker buildx imagetools create \
+              --tag "sungp2708/dbvault:$engine" \
+              "sungp2708/dbvault:$GITHUB_REF_NAME-$engine"
+          done
   validate:
     # MongoDB 8.0 rejects Linux kernels 6.19 through 7.0.13.
     runs-on: ubuntu-22.04

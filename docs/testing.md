@@ -126,8 +126,77 @@ conditions, lifecycle, cancellation and SQLite restore for all codecs. These
 emulators do not validate live IAM/KMS policies. TLS Slack tests use an in-process
 test server and no actual webhook. Native cancellation tests spawn descendants
 and check that they terminate. Scheduler tests cover state/CRUD/validation.
-Benchmark
-commands are in `make bench`; report only actual runs.
+Microbenchmark commands are in `make bench`.
+
+### PostgreSQL local restore baseline for v0.8.0
+
+Measured on 2026-11-09 using Linux amd64 binaries built with Go 1.27.3,
+PostgreSQL 16.15 (`postgres:16-bookworm`), and Docker Desktop on an Intel
+i7-9750H host. The source and native tools ran in the same container. Backups,
+the dedicated `TMPDIR`, and the PITR recovery directory used a Docker volume.
+Logical backups used gzip level 6. Native PITR used unencrypted tar archives.
+The comparison is between the source of tag `v0.7.0` and `develop` at `2f20885`.
+Those revisions differ only in workflows and documentation.
+
+Use a disposable PostgreSQL instance with WAL archiving enabled and seed it
+with the following table. This produced a 112 MiB relation and an approximately
+54 MiB compressed logical archive.
+
+```sql
+CREATE TABLE items AS
+SELECT i AS id, (
+  SELECT string_agg(md5(i::text || chr(j)), '')
+  FROM generate_series(65, 80) j
+) AS payload
+FROM generate_series(1, 200000) i;
+```
+
+Use the same local-storage configuration, with separate storage directories
+for the two revisions. Alternate their order across three repetitions. Time
+full backup and restore into fresh databases and verify the restored row count,
+ID sum, payload length and ordered payload hash. For PITR, create a base with
+v0.7.0, insert one row before the target time and another after it, then capture
+WAL. Restore the same base and log archive with both revisions. Time
+`pitr restore` into a fresh directory separately from starting PostgreSQL and
+polling until recovery pauses. Verify the before-target row is
+present and the after-target row is absent.
+
+For each command, sample the CLI's Linux `VmHWM` and allocated blocks under
+`TMPDIR` roughly every 50 ms. RAM excludes PostgreSQL and tool subprocesses.
+Temporary disk excludes final output, backup storage and PostgreSQL data.
+Sampling can miss short-lived peaks. These figures characterize this fixture
+and environment.
+
+Median of three runs per revision. RSS and temporary disk are in MiB.
+
+| Operation | v0.7.0 time | Develop time | v0.7.0 CLI RSS | Develop CLI RSS | v0.7.0 temp disk | Develop temp disk |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full backup | 9.76 s | 9.57 s | 44.9 | 44.9 | <0.01 | <0.01 |
+| Full restore | 6.09 s | 5.94 s | 46.5 | 44.8 | 206.3 | 207.2 |
+| PITR restore, directory preparation | 1.74 s | 1.71 s | 47.6 | 48.0 | 284.1 | 279.6 |
+| PITR restore, through PostgreSQL replay pause | 4.18 s | 3.76 s | — | — | — | — |
+
+PITR used the same 151 MiB base and 64 MiB WAL archive for both binaries.
+The total includes container startup and polling for the replay pause. It is
+the median of the per-run totals. Develop restored the v0.7.0 logical backup
+and replayed the v0.7.0 PITR chain to the expected point. Timing varied across
+runs, and the two baseline revisions share the same runtime code.
+
+#### Logical restore after removing a redundant temporary copy
+
+Repeat three restores per binary from one v0.7.0 full backup on the same
+fixture, alternating develop and the patched build. Every restored dataset
+matched the source.
+
+| Build | Median time | Time range | Median CLI RSS | Median temp disk |
+| --- | ---: | ---: | ---: | ---: |
+| Develop at `2f20885` | 5.54 s | 5.17–5.93 s | 44.9 MiB | 206.9 MiB |
+| Patched build | 5.40 s | 5.01–6.70 s | 45.1 MiB | 154.3 MiB |
+
+Peak sampled temporary disk fell by 52.6 MiB (25.4%) in this fixture.
+The time ranges overlap. The v0.8.0 runtime change is limited to removing the
+extra copy of the verified snapshot for unencrypted logical backups. The
+patched build also replayed the v0.7.0 PITR chain to the expected point.
 
 ---
 

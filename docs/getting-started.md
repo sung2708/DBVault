@@ -11,8 +11,9 @@ illustrative; actual command results are metadata records and stderr logs.
 Backups have unique names such as `demo_db_20261001_020000_<random-id>.dump.gz`.
 Use the actual `backup_name` printed by backup or `dbvault list`. PostgreSQL
 restore uses pg_restore custom archives, not plaintext SQL/psql. Before restore,
-DBVault verifies a private snapshot of stored bytes; ensure space for one
-compressed artifact in the OS temporary directory. See ADR-0007.
+DBVault verifies a private snapshot of stored bytes. Allow space for both the
+stored artifact and the decompressed dump in the OS temporary directory for
+an unencrypted full restore. See [restore requirements](restore.md#current-postgresql-restore-contract).
 
 ---
 

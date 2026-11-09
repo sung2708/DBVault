@@ -1,12 +1,12 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -115,6 +115,13 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 		base, e = s.latestBase(ctx)
 		if e != nil {
 			return operation, e
+		}
+		pending, e := storage.DeletePending(ctx, s.Store, base.Name, ".meta.json")
+		if e != nil {
+			return operation, e
+		}
+		if pending {
+			return operation, fmt.Errorf("base backup %s has a pending deletion", base.Name)
 		}
 		if base.Delta != nil && base.Delta.Depth >= 32 {
 			return operation, fmt.Errorf("incremental chain limit reached; create a full backup")
@@ -286,13 +293,10 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 	s.stage("backup.register", "start")
 	b, err := metadata.Encode(m)
 	if err == nil {
-		err = s.Store.Put(ctx, key+".meta.json", bytes.NewReader(b), int64(len(b)))
+		err = storage.PublishManifest(ctx, s.Store, key+".meta.json", b)
 	}
 	if err != nil {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cleanupCancel()
-		cleanupErr := s.Store.Delete(cleanupCtx, key)
-		return operation, fault.Wrap(fault.Storage, "register manifest", errors.Join(err, cleanupErr))
+		return operation, fault.Wrap(fault.Storage, "register manifest", err)
 	}
 	operation.Manifest = m
 	operation.BackupID = m.ID
@@ -349,7 +353,11 @@ func (s *Service) snapshot(ctx context.Context, key string) (metadata.Manifest, 
 		return m, nil, fault.Wrap(fault.Integrity, "verify stored artifact", e)
 	}
 	s.stage("restore.verify", "start")
-	digest, n, err := pipeline.Hash(ctx, s.meter(r, "restore.verify", m.Pipeline.Stored), f)
+	limit := m.Pipeline.Stored
+	if limit < math.MaxInt64 {
+		limit++
+	}
+	digest, n, err := pipeline.Hash(ctx, s.meter(io.LimitReader(r, limit), "restore.verify", m.Pipeline.Stored), f)
 	if err != nil {
 		return fail(err)
 	}
@@ -535,19 +543,32 @@ func (s *Service) Delete(ctx context.Context, key string, confirm, dry bool) (re
 			return err
 		}
 	}
-	s.stage("manifest", "start")
-	m, err := s.ReadManifest(ctx, key)
-	if err != nil {
-		return err
-	}
-	s.emit(Event{Stage: "manifest", State: "complete", Manifest: m})
 	if !dry {
 		release, err := s.chainLock(ctx)
 		if err != nil {
 			return err
 		}
 		defer release(&resultErr)
+		pending, err := storage.DeletePending(ctx, s.Store, key, ".meta.json")
+		if err != nil {
+			return err
+		}
+		if pending {
+			registered, err := s.Store.Exists(ctx, key+".meta.json")
+			if err != nil {
+				return err
+			}
+			if !registered {
+				return storage.DeleteRegistered(ctx, s.Store, key, ".meta.json")
+			}
+		}
 	}
+	s.stage("manifest", "start")
+	m, err := s.ReadManifest(ctx, key)
+	if err != nil {
+		return err
+	}
+	s.emit(Event{Stage: "manifest", State: "complete", Manifest: m})
 	items, err := s.List(ctx, "")
 	if err != nil {
 		return err
@@ -564,12 +585,21 @@ func (s *Service) Delete(ctx context.Context, key string, confirm, dry bool) (re
 	// Unregister before removing bytes; an interrupted delete cannot expose a
 	// manifest pointing to missing data as a valid backup.
 	s.stage("delete", "start")
-	if err := s.Store.Delete(ctx, key+".meta.json"); err != nil {
-		return err
-	}
-	err = s.Store.Delete(ctx, key)
+	err = storage.DeleteRegistered(ctx, s.Store, key, ".meta.json")
 	if err == nil {
 		s.stage("delete", "complete")
 	}
 	return err
+}
+
+func (s *Service) ResumeDeletes(ctx context.Context) (resultErr error) {
+	if err := s.Config.Storage.CheckDelete(); err != nil {
+		return err
+	}
+	release, err := s.chainLock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release(&resultErr)
+	return storage.ResumeDeletes(ctx, s.Store, ".meta.json")
 }

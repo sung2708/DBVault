@@ -204,25 +204,25 @@ func (s *Service) materializeSnapshot(ctx context.Context, m metadata.Manifest, 
 		if err != nil {
 			return nil, err
 		}
-		src = r
-	}
-	// Authenticate the entire ciphertext before allowing decompression or restore.
-	encoded, err := os.CreateTemp("", "dbvault-encoded-*")
-	if err != nil {
-		return nil, err
-	}
-	defer removeTemp(encoded)
-	if _, err = io.Copy(encoded, src); err != nil {
-		return nil, err
-	}
-	if _, err = encoded.Seek(0, io.SeekStart); err != nil {
-		return nil, err
+		// Authenticate the entire ciphertext before allowing decompression or restore.
+		encoded, err := os.CreateTemp("", "dbvault-encoded-*")
+		if err != nil {
+			return nil, err
+		}
+		defer removeTemp(encoded)
+		if _, err = io.Copy(encoded, r); err != nil {
+			return nil, err
+		}
+		if _, err = encoded.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		src = pipeline.Reader{Context: ctx, Source: encoded}
 	}
 	c, err := compression.New(m.Pipeline.Compression, m.Pipeline.Level)
 	if err != nil {
 		return nil, err
 	}
-	reader, err := c.Decompress(pipeline.Reader{Context: ctx, Source: encoded})
+	reader, err := c.Decompress(src)
 	if err != nil {
 		return nil, err
 	}

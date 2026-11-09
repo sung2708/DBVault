@@ -266,8 +266,8 @@ func TestNativeCleanupVerificationPreviewAndLock(t *testing.T) {
 	if err != nil || len(got) != 0 {
 		t.Fatal(got, err)
 	}
-	if exists, err := store.Exists(ctx, old.Name); err != nil || !exists {
-		t.Fatalf("expected only an unregistered payload after interruption: %v", err)
+	if exists, err := store.Exists(ctx, old.Name); err != nil || exists {
+		t.Fatalf("retry left an unregistered payload: %v", err)
 	}
 	if ok, _ := store.Exists(ctx, "dbvault_pitr.lock"); ok {
 		t.Fatal("native lock leaked")

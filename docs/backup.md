@@ -40,8 +40,9 @@ Local storage writes a randomly named private temporary file, syncs/closes it,
 publishes with an atomic hard link without replacing an existing key, then
 removes the temporary name. Hard-link support is required. Completed `.meta.json`
 manifests register successful backups; list/retention ignore orphan artifacts.
-Failure to register metadata triggers artifact deletion, with cleanup failures
-reported. A host crash between publication and registration can leave an orphan.
+If a manifest write returns an error, DBVault reads it back and accepts an exact
+match. Otherwise it reports an unconfirmed publication and preserves the archive
+for inspection. A crash before manifest registration can also leave an orphan.
 
 Native client/server major versions must match for PostgreSQL backup. The binary
 supports PostgreSQL 10+. Ctrl+C terminates the private process scope; pipe cleanup

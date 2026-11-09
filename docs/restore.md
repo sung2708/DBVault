@@ -48,11 +48,13 @@ The implemented format is a native custom archive (`.dump`, optionally `.gz` or
 Before any writes, DBVault validates versioned metadata, copies/hashes the exact
 stored bytes into a private temporary file, checks compressed size and SHA-256,
 then validates database engine/format and server/client version compatibility.
-It decompresses that same snapshot into pg_restore with `--exit-on-error`,
-`--single-transaction`, `--no-owner`, and `--no-privileges`.
+DBVault materializes a decompressed dump before passing it to `pg_restore` with
+`--exit-on-error`, `--single-transaction`, `--no-owner`, and `--no-privileges`.
 
-Restore requires temporary disk space for one compressed artifact; memory is
-bounded. Temporary snapshots are removed on success, failure and cancellation.
+For an unencrypted full restore, budget temporary disk space for the stored
+artifact and the decompressed dump. Encrypted restores also stage the fully
+authenticated encoded payload. Incremental restores can materialize additional
+chain members. Temporary files are removed on success, failure and cancellation.
 `--dry-run` performs these checks without database writes. `--confirm` authorizes
 actual restoration. Only trusted backups should be restored: a sidecar checksum
 detects corruption but does not authenticate an attacker-controlled manifest.

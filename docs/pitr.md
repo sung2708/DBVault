@@ -95,15 +95,18 @@ including all baselines tied at that timestamp.
 Age uses the newest range's coverage end, so an active chain is retained in full.
 Both zero disables deletion. Superseded whole chains are deleted child-first;
 branches of a retained baseline are also retained. Rotate baselines regularly
-to let storage expire. Cleanup verifies all retained archives and any expired archives still present
-before deleting data. Corruption or missing parents aborts deletion.
+to let storage expire. Before starting new deletions, cleanup checks the stored
+checksum, authenticates encrypted archives and validates archive members for
+retained archives and available expired archives. The member check uses empty
+files to detect path conflicts without writing extracted payloads. Corruption
+or missing parents aborts new deletions.
 
 `pitr backup --cleanup` applies retention after publishing a successful backup.
 Cleanup failure reports that publication succeeded. Logical cleanup still
 manages only logical dumps. Native mutations and restores share an exclusive
 storage lock, `dbvault_pitr.lock`; inspect and remove a stale lock only after
-confirming its owner has stopped. Interrupted publication/deletion can leave
-orphan archives or sidecars; inspect failures before retrying. Never manually
+confirming its owner has stopped. Cleanup retries registered pending deletions.
+An unconfirmed manifest write preserves the archive for inspection. Never manually
 remove archives belonging to a recovery chain you need.
 
 ## Recover to a time

@@ -159,8 +159,12 @@ func TestFailuresCleanResources(t *testing.T) {
 				t.Fatal("failure not propagated")
 			}
 			items, err := s.Store.List(context.Background(), "")
-			if err != nil || len(items) != 0 {
-				t.Fatal("left incomplete resources", items, err)
+			expected := 0
+			if mode == "manifest" {
+				expected = 1 // Publication could still complete after a lost response.
+			}
+			if err != nil || len(items) != expected {
+				t.Fatal("unexpected stored resources", items, err)
 			}
 		})
 	}
@@ -207,6 +211,105 @@ func TestLogsAndMetadataHaveNoSecrets(t *testing.T) {
 	for _, secret := range []string{"SUPER_SECRET_DB_PASSWORD_12345", "SUPER_SECRET_WEBHOOK_12345"} {
 		if strings.Contains(logs.String(), secret) || bytes.Contains(data, []byte(secret)) {
 			t.Fatal("secret in log/metadata")
+		}
+	}
+}
+
+type lostManifestResponse struct{ storage.Provider }
+
+func (s lostManifestResponse) Put(ctx context.Context, key string, r io.Reader, size int64) error {
+	if err := s.Provider.Put(ctx, key, r, size); err != nil {
+		return err
+	}
+	if strings.HasSuffix(key, ".meta.json") {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+func TestBackupRecoversLostManifestResponse(t *testing.T) {
+	s, _, _ := setup(t, "gzip")
+	s.Store = lostManifestResponse{s.Store}
+	ctx := context.Background()
+	m, err := s.Backup(ctx, "full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Restore(ctx, m.Name, true, false, database.RestoreOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type countedArtifact struct {
+	storage.Provider
+	key  string
+	read int64
+}
+
+func (s *countedArtifact) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	if key == s.key {
+		return io.NopCloser(io.TeeReader(strings.NewReader(strings.Repeat("x", 1<<20)), s)), nil
+	}
+	return s.Provider.Get(ctx, key)
+}
+
+func (s *countedArtifact) Write(p []byte) (int, error) {
+	s.read += int64(len(p))
+	return len(p), nil
+}
+
+func TestRestoreBoundsOversizedStoredArtifact(t *testing.T) {
+	s, db, _ := setup(t, "gzip")
+	ctx := context.Background()
+	m, err := s.Backup(ctx, "full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &countedArtifact{Provider: s.Store, key: m.Name}
+	s.Store = store
+	err = s.Restore(ctx, m.Name, true, false, database.RestoreOptions{})
+	if err == nil || fault.ExitCode(err) != 4 || db.restoreCalled || store.read != m.Pipeline.Stored+1 {
+		t.Fatalf("read %d bytes (want %d), restore called %v, error %v", store.read, m.Pipeline.Stored+1, db.restoreCalled, err)
+	}
+}
+
+type interruptedArchiveDelete struct {
+	storage.Provider
+	key string
+}
+
+func (s interruptedArchiveDelete) Delete(ctx context.Context, key string) error {
+	if key == s.key {
+		return context.DeadlineExceeded
+	}
+	return s.Provider.Delete(ctx, key)
+}
+
+func TestDeleteResumesAfterUnregistering(t *testing.T) {
+	for _, cleanup := range []bool{false, true} {
+		s, _, _ := setup(t, "gzip")
+		ctx := context.Background()
+		m, err := s.Backup(ctx, "full", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store := s.Store
+		s.Store = interruptedArchiveDelete{store, m.Name}
+		if err := s.Delete(ctx, m.Name, true, false); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal(err)
+		}
+		s.Store = store
+		if cleanup {
+			err = s.ResumeDeletes(ctx)
+		} else {
+			err = s.Delete(ctx, m.Name, true, false)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		objects, err := store.List(ctx, "")
+		if err != nil || len(objects) != 0 {
+			t.Fatal(objects, err)
 		}
 	}
 }

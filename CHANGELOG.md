@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Use the verified snapshot directly when decompressing unencrypted logical
+  backups, saving one stored-artifact-sized temporary copy during restore.
+
+### Fixed
+- Preserve backup archives when manifest publication cannot be confirmed.
+- Bound logical restore downloads by the manifest's stored size.
+- Resume interrupted backup deletions using durable deletion markers.
+- Validate PITR retention archives without writing extracted payloads.
+- Promote Docker Hub engine aliases only from the latest GitHub release.
+
 ## [v0.7.0] - 2026-11-09
 
 ### Added

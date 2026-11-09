@@ -63,7 +63,7 @@ func (s *Service) Restore(ctx context.Context, name string, at time.Time, direct
 		if e = os.Mkdir(dir, 0700); e != nil {
 			return result, e
 		}
-		if e = s.unpack(ctx, m, dir); e != nil {
+		if e = s.unpack(ctx, m, dir, false); e != nil {
 			return result, e
 		}
 	}

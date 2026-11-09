@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sung2708/DBVault/internal/config"
+	"github.com/sung2708/DBVault/internal/storage"
 )
 
 // Storage publication is exclusive across processes, including restore readers.
@@ -214,7 +215,7 @@ func SelectCleanup(items []Record, policy config.Retention, now time.Time) ([]Re
 	return result, nil
 }
 
-// Cleanup verifies every retained and available expired archive before deleting any data.
+// Cleanup validates retained and available expired archives before starting new deletions.
 // Dry runs validate the entire dependency graph and never delete archives.
 func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Record, err error) {
 	if !dry {
@@ -227,6 +228,11 @@ func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Rec
 		return nil, err
 	}
 	defer release(&err)
+	if !dry {
+		if err := storage.ResumeDeletes(ctx, s.Store, ".pitr.json"); err != nil {
+			return nil, err
+		}
+	}
 	items, err := s.List(ctx)
 	if err != nil {
 		return nil, err
@@ -236,7 +242,6 @@ func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Rec
 		return candidates, err
 	}
 	expired := make(map[string]bool, len(candidates))
-	missing := make(map[string]bool)
 	for _, m := range candidates {
 		expired[m.Name] = true
 	}
@@ -247,7 +252,6 @@ func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Rec
 				return nil, err
 			}
 			if !exists {
-				missing[m.Name] = true
 				continue
 			}
 		}
@@ -255,7 +259,7 @@ func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Rec
 		if e != nil {
 			return nil, e
 		}
-		e = s.unpack(ctx, m, dir)
+		e = s.unpack(ctx, m, dir, true)
 		removeErr := os.RemoveAll(dir)
 		if e != nil {
 			return nil, e
@@ -265,13 +269,8 @@ func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Rec
 		}
 	}
 	for _, m := range candidates {
-		if err = s.Store.Delete(ctx, m.Name+".pitr.json"); err != nil {
+		if err = storage.DeleteRegistered(ctx, s.Store, m.Name, ".pitr.json"); err != nil {
 			return nil, err
-		}
-		if !missing[m.Name] {
-			if err = s.Store.Delete(ctx, m.Name); err != nil {
-				return nil, err
-			}
 		}
 	}
 	return candidates, nil

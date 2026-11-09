@@ -17,6 +17,7 @@ import (
 	"time"
 
 	runner "github.com/sung2708/DBVault/internal/exec"
+	"github.com/sung2708/DBVault/internal/storage"
 	"github.com/sung2708/DBVault/internal/toolresolve"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -306,6 +307,13 @@ func (s *Service) capture(ctx context.Context, parent string) (Record, error) {
 		return Record{}, fmt.Errorf("PITR chain limit reached; create a new base")
 	}
 	last := chain[len(chain)-1]
+	pending, e := storage.DeletePending(ctx, s.Store, last.Name, ".pitr.json")
+	if e != nil {
+		return Record{}, e
+	}
+	if pending {
+		return Record{}, fmt.Errorf("PITR parent %s has a pending deletion", last.Name)
+	}
 	if last.Engine != s.Config.Database.Type {
 		return Record{}, fmt.Errorf("PITR engine mismatch")
 	}

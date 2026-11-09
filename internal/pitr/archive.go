@@ -290,16 +290,13 @@ func (s *Service) publish(ctx context.Context, m Record, dir string) (Record, er
 		return m, e
 	}
 	b, _ := json.Marshal(m)
-	if e = s.Store.Put(ctx, m.Name+".pitr.json", bytes.NewReader(b), int64(len(b))); e != nil {
-		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		s.Store.Delete(c, m.Name)
+	if e = storage.PublishManifest(ctx, s.Store, m.Name+".pitr.json", b); e != nil {
 		return m, e
 	}
 	return m, nil
 }
 
-func (s *Service) unpack(ctx context.Context, m Record, dir string) error {
+func (s *Service) unpack(ctx context.Context, m Record, dir string, validateOnly bool) error {
 	r, e := s.Store.Get(ctx, m.Name)
 	if e != nil {
 		return e
@@ -383,7 +380,11 @@ func (s *Service) unpack(ctx context.Context, m Record, dir string) error {
 		if err != nil {
 			return err
 		}
-		_, err = io.Copy(out, tr)
+		var destination io.Writer = out
+		if validateOnly {
+			destination = io.Discard
+		}
+		_, err = io.Copy(destination, tr)
 		ce := out.Close()
 		if err != nil {
 			return err
