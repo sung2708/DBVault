@@ -462,7 +462,12 @@ Only explicit stable SemVer tags trigger packaging. Validation requires a matchi
 prepared changelog section, module hygiene, formatting, vet, unit/race tests and
 database/cloud drills. Archives contain the executable, README.md and LICENSE;
 `checksums.txt` uses archive basenames so verification works after download.
-CI ordinary branch builds never publish. The module's executable install path is
+CI ordinary branch builds never publish. Push the release candidate to
+`develop` first and wait for the full CI run on that exact commit. Once green,
+fast-forward `main` to the tested commit. If promotion changes the commit,
+validate the resulting `main` commit before tagging. Confirm the remote
+`main` contains the intended release commit and that the worktree is clean.
+Create and push the annotated release tag from `main`. The module's executable install path is
 `github.com/sung2708/DBVault/cmd/dbvault@VERSION`.
 
 The following operational tooling files must be preserved in source snapshots:
@@ -733,7 +738,11 @@ Run Verification Suite (gofmt, go vet, go test -race, build)
          ↓
 Review Clean Git Working State
          ↓
-Create Annotated Git Tag (`git tag -a vX.Y.Z -m "DBVault vX.Y.Z"`)
+Push Candidate to develop and Wait for Green CI
+         ↓
+Promote Tested Commit to main and Push main
+         ↓
+Create Annotated Git Tag from main (`git tag -a vX.Y.Z -m "DBVault vX.Y.Z"`)
          ↓
 Push Git Tag (`git push origin vX.Y.Z`)
          ↓
@@ -759,7 +768,8 @@ Release management distinguishes between **preparation** and **publication**:
 - Verify reproducible local builds.
 
 ### Release Publication (`publish release`)
-- Create Git release tag.
+- Promote the CI-verified commit from `develop` to `main`.
+- Create the Git release tag from the promoted commit on `main`.
 - Push tag to remote repository.
 - Trigger CI packaging pipelines.
 - Publish GitHub Release assets.
