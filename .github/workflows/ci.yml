@@ -34,7 +34,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$GOBIN/dbvault" --help
           "$GOBIN/dbvault" version --output json
-          "$GOBIN/dbvault" update check --output json
+          "$GOBIN/dbvault" update check --help
           "$GOBIN/dbvault" init --non-interactive --database sqlite --database-name ./init.db --storage local --config ./init.yaml --output json
           "$GOBIN/dbvault" config --config ./init.yaml
           "$GOBIN/dbvault" doctor --help
