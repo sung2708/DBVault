@@ -1,5 +1,8 @@
 # Getting Started with DBVault
 
+For a first backup and restore using a local SQLite file, follow the
+[SQLite quickstart](../README.md#quickstart-back-up-and-restore-sqlite).
+
 This tutorial guides you through setting up DBVault, configuring your first database connection, creating a verified backup, and executing a safe restore test.
 
 The current binary supports PostgreSQL, MySQL, MongoDB and SQLite with
