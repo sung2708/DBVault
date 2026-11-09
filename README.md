@@ -14,6 +14,32 @@
 
 ---
 
+## Quickstart: back up and restore SQLite
+
+Download DBVault from [GitHub Releases](https://github.com/sung2708/DBVault/releases)
+and put it on your `PATH`, or follow the [installation guide](docs/installation.md).
+This exercise uses `sqlite3` to create sample data and check the restore.
+
+```sh
+mkdir dbvault-demo && cd dbvault-demo
+sqlite3 source.sqlite "CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('hello DBVault');"
+dbvault init --non-interactive --database sqlite --database-name ./source.sqlite --storage local --config ./dbvault.yaml
+dbvault backup --config ./dbvault.yaml
+dbvault list --config ./dbvault.yaml
+```
+
+Replace `BACKUP_NAME` with the name shown by `list`. Restore to a fresh file and
+compare the query results:
+
+```sh
+dbvault restore --config ./dbvault.yaml --target BACKUP_NAME --new-database --database ./restored.sqlite --confirm
+sqlite3 -readonly source.sqlite "SELECT body FROM notes;"
+sqlite3 -readonly restored.sqlite "SELECT body FROM notes;"
+```
+
+Both queries should print `hello DBVault`. For PostgreSQL and other engines, see
+[Getting Started](docs/getting-started.md) and the [database requirements](docs/databases.md).
+
 ## Current Project Status
 
 Version `v0.7.0` adds opt-in [S3 deletion protection](docs/storage.md#s3-object-lock),
@@ -22,25 +48,6 @@ It retains native WAL/binlog/oplog recovery, managed encryption keys, scheduled
 recovery drills and [independent monitoring](docs/independent-monitoring.md).
 The AWS live verification fixture is available, and live S3/KMS/Object Lock
 verification is pending. See the [verification procedure](docs/testing.md#release-verification-on-aws).
-
-### Start here
-
-Download the executable for your platform from [GitHub Releases](https://github.com/sung2708/DBVault/releases)
-and put it on `PATH`, or use `go install github.com/sung2708/DBVault/cmd/dbvault@latest`.
-Go is required only for source installation. Install native tools for your database,
-then run:
-
-```text
-dbvault init
-dbvault doctor
-dbvault backup
-dbvault health
-```
-
-Follow the password environment-variable instructions printed by `init` before
-running `doctor`. Configure `health.max_backup_age` and enable
-`protection.verify_after_backup` for recorded integrity checks. For recovery testing,
-see [recovery drills](docs/cli-reference.md#dbvault-recovery-drill).
 
 Downloads and versioned GHCR images become available after the release workflow
 succeeds. Install this release with
