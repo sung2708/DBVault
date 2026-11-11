@@ -44,6 +44,15 @@ validation remain future milestones. See
 - [x] Match full names in the picker and keep the selected storage configuration
   through execution.
 
+### v0.9.1–v0.9.2 security updates
+
+- [x] Patch Go dependencies and remove unused vulnerable image components.
+- [x] Package PostgreSQL 16 and rebuilt MongoDB 100.20.0 clients with updated
+  runtime libraries, preserving non-root users and archive compatibility.
+- [x] Test archive restoration between upstream and packaged clients on
+  Linux amd64 and arm64.
+- [x] Document the Alpine musl branch-specific fix and Scout matching caveat.
+
 ### v0.10
 
 - [ ] Charm v2 (Huh/Lip Gloss) migration.
