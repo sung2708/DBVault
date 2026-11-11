@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v0.9.2] - 2026-11-11
 
 ### Security
+- Update the MySQL 8.4 runtime's glibc packages to the vendor security
+  release, resolving the remaining glibc advisories reported for v0.9.1.
 - Package PostgreSQL 16 client tools in an updated Alpine 3.24 runtime with
   TLS, LDAP, GSSAPI and compression libraries. Exclude server-only libraries
   and apply the distribution's Kerberos, musl and zlib security updates.
