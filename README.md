@@ -42,22 +42,22 @@ Both queries should print `hello DBVault`. For PostgreSQL and other engines, see
 
 ## Current Project Status
 
-The source branch contains the upcoming `v0.9.0` changes. In a terminal,
+Version `v0.9.0` expands interactive backup selection. In a terminal,
 `restore`, `export`, `inspect`, `verify` and `delete` can select a backup when
 `--target` is omitted. Search with `/`, including by full backup name. An
 interactive restore to an existing destination requires typing its name.
 See [terminal UI](docs/terminal-ui.md) for confirmation and automation behavior.
 
-The latest published version, `v0.8.0`, reduces temporary disk use for
-unencrypted logical restores, preserves archives when manifest publication is
-uncertain, and retries interrupted backup deletions. See the [PostgreSQL restore baseline](docs/testing.md#postgresql-local-restore-baseline-for-v080).
+Version `v0.8.0` reduced temporary disk use for
+unencrypted logical restores, preserved archives when manifest publication was
+uncertain, and added retries for interrupted backup deletions. See the [PostgreSQL restore baseline](docs/testing.md#postgresql-local-restore-baseline-for-v080).
 It retains native WAL/binlog/oplog recovery, managed encryption keys, scheduled
 recovery drills and [independent monitoring](docs/independent-monitoring.md).
 The AWS live verification fixture is available, and live S3/KMS/Object Lock
 verification is pending. See the [verification procedure](docs/testing.md#release-verification-on-aws).
 
 Install the latest published release with
-`go install github.com/sung2708/DBVault/cmd/dbvault@v0.8.0`.
+`go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.0`.
 See the [changelog](CHANGELOG.md).
 
 Restore can create a destination

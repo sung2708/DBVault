@@ -9,7 +9,7 @@ This document outlines the phased development roadmap for DBVault, based on an a
 The repository implements all four database engines and storage providers,
 Slack, retention and persistent cron schedules. See
 [verified status](implementation-status.md) for executed checks.
-Releases through v0.8.0 include logical incremental chains, native
+DBVault supports logical incremental chains, native
 WAL/binlog/oplog recovery chains, client-side and KMS/Vault envelope encryption,
 native scheduling/retention, a Prometheus metrics exporter, independent
 freshness monitoring and safer backup publication. Differential backups,
@@ -31,7 +31,7 @@ validation remain future milestones. See
 - [x] MySQL/MongoDB recovery drills in new isolated Docker servers with fresh
   credentials, structural validation and real integration coverage.
 
-### v0.9.0 (implemented, publication pending)
+### v0.9.0
 
 - [x] Go 1.26.11 toolchain for standard-library security fixes, `govulncheck`
   in CI and Dependabot for Go modules, GitHub Actions and Docker images.

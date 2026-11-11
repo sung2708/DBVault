@@ -12,7 +12,7 @@ input for temporary connection tests. No alternate-screen dashboard or mouse UI
 is used. `TERM=dumb` falls back to numbered choices, yes/no and plain input.
 Prompt/review messages go to stderr; final results go to stdout. Existing commands
 keep their flags and destructive-operation guards. Interactive restore selection
-in the upcoming `v0.9.0` uses a bounded, `/`-filterable backup list with aligned
+in `v0.9.0` uses a bounded, `/`-filterable backup list with aligned
 columns that fit the terminal width, a labeled restore plan with a highlighted
 `--clean` warning, and typed destination-name confirmation for existing
 destinations (see [restore workflows](restore-workflows.md#terminal-selection-and-output)).

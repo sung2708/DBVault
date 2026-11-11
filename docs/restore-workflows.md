@@ -2,7 +2,7 @@
 
 Restore destinations, history and verified exports were introduced in
 `v0.5.0`. The expanded picker and typed confirmation below describe the
-upcoming `v0.9.0`. See the [installation guide](installation.md) for the
+`v0.9.0` workflow. See the [installation guide](installation.md) for the
 latest published version.
 
 ## Restore into a new database or file
