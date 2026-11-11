@@ -344,7 +344,7 @@ func (o *options) run(c *cobra.Command, name string) error {
 		if err != nil {
 			return err
 		}
-		display.RestorePreview(m, cfg.Database, newDB, backupBefore, clean, tables, schemas, collections)
+		display.RestorePreview(presentation.RestorePlan{Manifest: m, Destination: cfg.Database, NewDatabase: newDB, BackupBefore: backupBefore, Clean: clean, Tables: tables, Schemas: schemas, Collections: collections})
 		result, restoreErr := svc.RestoreWithResult(ctx, key, confirm, dry, app.RestoreRequest{NewDatabase: newDB, BackupBefore: backupBefore, Options: database.RestoreOptions{Clean: clean, Tables: tables, Schemas: schemas, Collections: collections}})
 		if result.Backup.ID != "" {
 			return errors.Join(restoreErr, o.output(c, result))

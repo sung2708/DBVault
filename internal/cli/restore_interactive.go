@@ -10,6 +10,7 @@ import (
 	"github.com/sung2708/DBVault/internal/onboarding"
 	"github.com/sung2708/DBVault/internal/presentation"
 	"github.com/sung2708/DBVault/internal/storage/providers"
+	"path/filepath"
 	"time"
 )
 
@@ -53,11 +54,19 @@ func (o *options) promptRestore(c *cobra.Command, p onboarding.Prompter, cfg con
 		if len(items) == 0 {
 			return fmt.Errorf("no completed backups found in configured storage")
 		}
-		choices := make([]onboarding.Choice, 0, len(items))
-		for _, m := range items {
-			choices = append(choices, onboarding.Choice{Label: fmt.Sprintf("%s | %s / %s | %s | %s", m.CreatedAt.UTC().Format("2006-01-02 15:04:05 UTC"), m.Database.Engine, m.Database.Name, presentation.FormatBytes(m.Pipeline.Stored), m.Name), Value: m.Name})
+		caps := presentation.Detect(c.ErrOrStderr())
+		picker := presentation.BackupChoices(items, caps.Width, caps.Unicode)
+		title := "Choose backup"
+		if picker.Source != "" {
+			title += " of " + picker.Source
 		}
-		selected, err := p.Select(c.Context(), "Choose backup", choices, items[0].Name)
+		var selected string
+		var err error
+		if list, ok := p.(onboarding.ListSelector); ok {
+			selected, err = list.SelectList(c.Context(), title+" (/ to filter)", picker.Header, picker.Choices, items[0].Name, min(len(picker.Choices), pickerRows)+pickerChrome)
+		} else {
+			selected, err = p.Select(c.Context(), title, picker.Choices, items[0].Name)
+		}
 		if err != nil {
 			return err
 		}
@@ -140,22 +149,41 @@ func (o *options) promptRestore(c *cobra.Command, p onboarding.Prompter, cfg con
 	tables, _ := c.Flags().GetStringSlice("table")
 	schemas, _ := c.Flags().GetStringSlice("schema")
 	collections, _ := c.Flags().GetStringSlice("collection")
+	plan := presentation.RestorePlan{Manifest: metadata.Manifest{Name: target}, Destination: cfg.Database, NewDatabase: newDB, BackupBefore: safety, Clean: clean, Tables: tables, Schemas: schemas, Collections: collections}
+	plan.Destination.Database = name
 	for _, m := range items {
 		if m.Name == target {
-			p.Message(fmt.Sprintf("Source database: %s\nBackup created: %s\nStored size: %s", m.Database.Name, presentation.FormatTime(m.CreatedAt), presentation.FormatBytes(m.Pipeline.Stored)))
+			plan.Manifest = m
 			break
 		}
 	}
-	destination := fmt.Sprintf("%s / %s:%d / %s", cfg.Database.Type, cfg.Database.Host, cfg.Database.Port, name)
-	if cfg.Database.Type == "sqlite" {
-		destination = "SQLite / " + name
+	p.Message("Restore plan\n" + presentation.FormatFields(plan.Fields(), presentation.Detect(c.ErrOrStderr()).Width))
+	for _, w := range plan.Warnings() {
+		if warner, ok := p.(onboarding.Warner); ok {
+			warner.Warning(w)
+		} else {
+			p.Message("Warning: " + w)
+		}
 	}
-	p.Message(fmt.Sprintf("Backup: %s\nDestination: %s\nCreate new: %t | Clean/drop restored objects: %t | Backup before restore: %t\nTables: %v | Schemas: %v | Collections: %v", target, destination, newDB, clean, safety, tables, schemas, collections))
 	confirmed, _ := c.Flags().GetBool("confirm")
 	if confirmed {
 		return nil
 	}
-	yes, err := p.Confirm(c.Context(), "Restore into this destination? Stop application writes first.", false)
+	if !newDB {
+		// Writing into an existing destination needs the operator to name it;
+		// --confirm remains the non-interactive authorization.
+		want := destinationConfirmation(cfg.Database.Type, name)
+		typed, err := p.Input(c.Context(), fmt.Sprintf("Type %q to restore into this existing destination. Stop application writes first.", want), "")
+		if err != nil {
+			return err
+		}
+		if typed != want {
+			p.Message("Confirmation did not match; nothing was restored.")
+			return context.Canceled
+		}
+		return c.Flags().Set("confirm", "true")
+	}
+	yes, err := p.Confirm(c.Context(), "Restore into this new destination?", false)
 	if err != nil {
 		return err
 	}
@@ -163,4 +191,20 @@ func (o *options) promptRestore(c *cobra.Command, p onboarding.Prompter, cfg con
 		return context.Canceled
 	}
 	return c.Flags().Set("confirm", "true")
+}
+
+const (
+	// pickerRows bounds visible backups; pickerChrome covers the title,
+	// filter and column header lines drawn above them.
+	pickerRows   = 10
+	pickerChrome = 3
+)
+
+// destinationConfirmation is the text an operator types to authorize a restore
+// into an existing destination: the database name, or the SQLite file name.
+func destinationConfirmation(engine, name string) string {
+	if engine == "sqlite" {
+		return filepath.Base(name)
+	}
+	return name
 }

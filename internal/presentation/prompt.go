@@ -67,47 +67,81 @@ func (p *TerminalPrompter) theme() *huh.Theme {
 	theme.Focused.PrevIndicator = lipgloss.NewStyle().SetString("<")
 	theme.Focused.FocusedButton = lipgloss.NewStyle().Underline(true).Padding(0, 1).MarginRight(1)
 	theme.Focused.BlurredButton = lipgloss.NewStyle().Padding(0, 1)
-	if !p.NoColor && os.Getenv("TERM") != "dumb" {
-		_, disabled := os.LookupEnv("NO_COLOR")
-		if !disabled {
-			s := newStyles(true)
-			theme.Focused.Title = s.accent
-			theme.Focused.SelectSelector = s.accent.SetString("> ")
-			theme.Focused.SelectedOption = s.accent
-			theme.Focused.ErrorMessage = s.failure
-		}
+	if p.color() {
+		s := newStyles(true)
+		theme.Focused.Title = s.accent
+		theme.Focused.SelectSelector = s.accent.SetString("> ")
+		theme.Focused.SelectedOption = s.accent
+		theme.Focused.ErrorMessage = s.failure
+		theme.Focused.Description = s.muted
 	}
 	theme.Blurred = theme.Focused
 	return theme
 }
+
+func (p *TerminalPrompter) color() bool {
+	_, disabled := os.LookupEnv("NO_COLOR")
+	return !p.NoColor && !disabled && os.Getenv("TERM") != "dumb"
+}
 func (p *TerminalPrompter) Select(ctx context.Context, title string, choices []onboarding.Choice, value string) (string, error) {
 	if os.Getenv("TERM") == "dumb" {
-		p.Message(title)
-		defaultIndex := 1
-		for i, choice := range choices {
-			p.Message(fmt.Sprintf("  %d. %s", i+1, choice.Label))
-			if choice.Value == value {
-				defaultIndex = i + 1
-			}
-		}
-		for {
-			answer, err := p.plainInput(ctx, "Choice number", strconv.Itoa(defaultIndex), false)
-			if err != nil {
-				return "", err
-			}
-			i, err := strconv.Atoi(answer)
-			if err == nil && i >= 1 && i <= len(choices) {
-				return choices[i-1].Value, nil
-			}
-			p.Message("Enter one of the listed numbers.")
-		}
+		return p.numberedSelect(ctx, title, "", choices, value)
 	}
+	err := p.run(ctx, huh.NewSelect[string]().Title(title).Options(p.options(choices)...).Value(&value))
+	return value, err
+}
+
+// SelectList scrolls within height rows and filters after "/": the filter
+// replaces the title while typing, arrows move and Enter picks the highlighted
+// match. Esc/Ctrl+C cancel, as in every other prompt.
+func (p *TerminalPrompter) SelectList(ctx context.Context, title, header string, choices []onboarding.Choice, value string, height int) (string, error) {
+	if os.Getenv("TERM") == "dumb" {
+		return p.numberedSelect(ctx, title, header, choices, value)
+	}
+	field := huh.NewSelect[string]().Title(title).Options(p.options(choices)...).Value(&value)
+	if header != "" {
+		// The description sits between the title and the options, two
+		// columns in, so it lines up with labels after the "> " selector.
+		field.Description("  " + p.clean(header))
+	}
+	if height > 0 {
+		field.Height(height)
+	}
+	return value, p.run(ctx, field)
+}
+
+func (p *TerminalPrompter) options(choices []onboarding.Choice) []huh.Option[string] {
 	options := make([]huh.Option[string], len(choices))
 	for i, c := range choices {
-		options[i] = huh.NewOption(c.Label, c.Value)
+		options[i] = huh.NewOption(p.clean(c.Label), c.Value)
 	}
-	err := p.run(ctx, huh.NewSelect[string]().Title(title).Options(options...).Value(&value))
-	return value, err
+	return options
+}
+
+func (p *TerminalPrompter) numberedSelect(ctx context.Context, title, header string, choices []onboarding.Choice, value string) (string, error) {
+	p.Message(title)
+	digits := len(strconv.Itoa(len(choices)))
+	if header != "" {
+		p.Message(strings.Repeat(" ", digits+4) + header)
+	}
+	defaultIndex := 1
+	for i, choice := range choices {
+		p.Message(fmt.Sprintf("  %*d. %s", digits, i+1, choice.Label))
+		if choice.Value == value {
+			defaultIndex = i + 1
+		}
+	}
+	for {
+		answer, err := p.plainInput(ctx, "Choice number", strconv.Itoa(defaultIndex), false)
+		if err != nil {
+			return "", err
+		}
+		i, err := strconv.Atoi(answer)
+		if err == nil && i >= 1 && i <= len(choices) {
+			return choices[i-1].Value, nil
+		}
+		p.Message("Enter one of the listed numbers.")
+	}
 }
 func (p *TerminalPrompter) Input(ctx context.Context, title, value string) (string, error) {
 	if os.Getenv("TERM") == "dumb" {
@@ -240,14 +274,28 @@ func (p *TerminalPrompter) plainInput(ctx context.Context, title, fallback strin
 	}
 }
 func (p *TerminalPrompter) Message(message string) {
+	fmt.Fprintln(p.Out, p.clean(message))
+}
+
+// Warning prints a highlighted warning line; without color it keeps a textual
+// marker so the emphasis survives NO_COLOR, --no-color and TERM=dumb.
+func (p *TerminalPrompter) Warning(message string) {
+	color := p.color()
+	text := symbol("warning", color && Detect(p.Out).Unicode) + " " + p.clean(message)
+	if color {
+		text = newStyles(true).warning.Render(text)
+	}
+	fmt.Fprintln(p.Out, text)
+}
+
+func (p *TerminalPrompter) clean(message string) string {
 	if p.Redactor != nil {
 		message = p.Redactor.Text(message)
 	}
-	message = strings.Map(func(r rune) rune {
+	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) && r != '\n' && r != '\t' {
 			return -1
 		}
 		return r
 	}, message)
-	fmt.Fprintln(p.Out, message)
 }

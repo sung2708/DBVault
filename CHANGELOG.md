@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Interactive restore lists backups in aligned columns (created, source, type,
+  encryption, stored size, name) that fit the terminal width, shows at most ten
+  rows and filters with `/`.
+- The interactive restore plan uses labeled fields, omits empty selectors and
+  highlights `--clean` as a warning.
+- Interactive restores into an existing destination require typing the
+  destination database name (SQLite: file name) instead of answering yes/no.
+  `--confirm` still authorizes restores without a prompt.
+- Progress lines show smoothed throughput, and an ETA when the total is known,
+  for stages running at least two seconds, and use `█░` bars on Unicode
+  terminals.
 - Replace the archived `gopkg.in/yaml.v3` with its maintained drop-in fork
   `go.yaml.in/yaml/v3`. Written configuration files are byte-identical.
 - Update AWS, Google Cloud, Azure, MongoDB driver, SQLite and other direct
