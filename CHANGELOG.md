@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.1] - 2026-11-11
+
+### Security
+- Update `go-jose/v4` to 4.1.9 for CVE-2026-116585, CVE-2026-116586 and
+  CVE-2026-116587. Update `golang.org/x/crypto` to
+  `v0.58.1-0.20261009181718-2f1f834330b2`, which removes the unmaintained
+  OpenPGP packages reported in GO-2026-5932.
+- Remove the unused `gosu` binary from the PostgreSQL, MySQL and MongoDB
+  runtime images. Remove MySQL Shell and its bundled `certifi` from the
+  MySQL runtime image. The images retain the native tools DBVault uses for
+  backup and restore.
+
 ## [v0.9.0] - 2026-11-11
 
 ### Changed

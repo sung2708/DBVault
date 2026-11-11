@@ -28,6 +28,8 @@ RUN microdnf --disablerepo='*' --enablerepo=ol9_baseos_latest install -y cpio \
     && mysqlbinlog --version
 
 FROM mysql:8.4 AS mysql
+# DBVault runs as mysql directly and uses the classic clients.
+RUN rpm -e mysql-shell && rm -f /usr/local/bin/gosu
 COPY --from=mysql-native-tools /usr/bin/mysqlbinlog /usr/bin/mysqlbinlog
 COPY --from=build /dbvault /usr/local/bin/dbvault
 USER mysql
@@ -35,6 +37,8 @@ WORKDIR /var/lib/mysql
 ENTRYPOINT ["dbvault"]
 
 FROM mongo:8.0 AS mongodb
+# DBVault runs as the configured non-root user without the server entrypoint.
+RUN rm -f /usr/local/bin/gosu
 COPY --from=build /dbvault /usr/local/bin/dbvault
 USER mongodb
 WORKDIR /data/db
@@ -47,6 +51,8 @@ ENTRYPOINT ["/usr/local/bin/dbvault"]
 
 # Client major must match the backup server major under DBVault's policy.
 FROM postgres:16-bookworm AS postgres
+# DBVault runs as the configured non-root user without the server entrypoint.
+RUN rm -f /usr/local/bin/gosu
 COPY --from=build /dbvault /usr/local/bin/dbvault
 USER postgres
 WORKDIR /var/lib/postgresql

@@ -111,6 +111,13 @@ jobs:
           docker run --rm dbvault:smoke --help
           if [ "$ENGINE" != sqlite ]; then
             test "$(docker run --rm --entrypoint id dbvault:smoke -u)" != 0
+            docker run --rm --entrypoint sh dbvault:smoke -ec '
+              test ! -e /usr/local/bin/gosu
+              if [ "$1" = mysql ]; then
+                if command -v mysqlsh; then exit 1; fi
+                test ! -d /usr/lib/mysqlsh
+              fi
+            ' sh "$ENGINE"
             case "$ENGINE" in
               postgres) tools="pg_dump pg_restore psql pg_basebackup" ;;
               mysql) tools="mysqldump mysql mysqlbinlog" ;;

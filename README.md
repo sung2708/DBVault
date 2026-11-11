@@ -56,8 +56,9 @@ recovery drills and [independent monitoring](docs/independent-monitoring.md).
 The AWS live verification fixture is available, and live S3/KMS/Object Lock
 verification is pending. See the [verification procedure](docs/testing.md#release-verification-on-aws).
 
-Install the latest published release with
-`go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.0`.
+Version `v0.9.1` updates Go dependencies and removes unused vulnerable tools
+from the database client images. Install it with
+`go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.1`.
 See the [changelog](CHANGELOG.md).
 
 Restore can create a destination

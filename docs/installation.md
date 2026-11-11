@@ -1,10 +1,10 @@
 # Installation Guide
 
-Version `v0.9.0` expands interactive backup selection and updates the build
-toolchain and dependencies. Install this version explicitly:
+Version `v0.9.1` updates Go dependencies and removes unused tools from the
+database client images. Install this version explicitly:
 
 ```bash
-go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.0
+go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.1
 ```
 
 Binary/container assets become available after the release workflow succeeds.
@@ -22,7 +22,9 @@ Linux amd64/arm64, macOS amd64/arm64 and Windows amd64, injecting the real tag,
 commit and UTC build time into `dbvault version`. It publishes archives only when
 maintainers push a release tag. Native database tools are not included in those
 archives. Docker runtime targets provide PostgreSQL client 16, MySQL 8.4 clients,
-MongoDB Database Tools, or embedded SQLite; choose the target for your engine.
+MongoDB Database Tools, or embedded SQLite. Choose the target for your engine.
+The MySQL image ships `mysql`, `mysqldump` and `mysqlbinlog` for DBVault's
+workflows. As of `v0.9.1`, it omits MySQL Shell (`mysqlsh`).
 
 ## Install with Go
 
