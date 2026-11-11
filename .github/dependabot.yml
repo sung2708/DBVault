@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      docker-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Bundled client majors must match the supported server majors; move
+      # them deliberately, not through automated bumps.
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+      - dependency-name: mysql
+        update-types: [version-update:semver-major]
+      - dependency-name: mongo
+        update-types: [version-update:semver-major]

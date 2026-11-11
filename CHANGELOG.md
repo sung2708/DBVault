@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Run `govulncheck` in CI, update CI and release workflows to current GitHub
+  Actions majors, and enable weekly Dependabot updates for Go modules,
+  GitHub Actions and Docker base images.
+
 ### Security
 - Build with the Go 1.26.11 toolchain instead of Go 1.26.0, picking up
   standard-library security fixes (`crypto/tls`, `crypto/x509`, `net/http`,

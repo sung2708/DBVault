@@ -13,8 +13,8 @@ jobs:
     # MongoDB 8.0 rejects Linux kernels 6.19 through 7.0.13.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -46,6 +46,16 @@ jobs:
           docker build -f Dockerfile.mysql-native-tools -t dbvault:native-mysql-tools .
           export DBVAULT_NATIVE_BINARY="$PWD/.tmp-build/dbvault-native-linux"
           go test -v -timeout=30m -tags=integration ./test/integration/...
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Known vulnerabilities in reachable code
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
   build:
     strategy:
       matrix:
@@ -62,8 +72,8 @@ jobs:
             arch: amd64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: go build ./cmd/dbvault
@@ -79,7 +89,7 @@ jobs:
         target: [postgres, mysql, mongodb, sqlite]
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
