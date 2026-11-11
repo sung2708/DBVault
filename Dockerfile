@@ -29,7 +29,10 @@ RUN microdnf --disablerepo='*' --enablerepo=ol9_baseos_latest install -y cpio \
 
 FROM mysql:8.4 AS mysql
 # DBVault runs as mysql directly and uses the classic clients.
-RUN rpm -e mysql-shell \
+RUN microdnf --disablerepo='*' --enablerepo=ol9_baseos_latest upgrade -y \
+        glibc glibc-common glibc-minimal-langpack \
+    && microdnf clean all \
+    && rpm -e mysql-shell \
     && rm -rf /usr/lib/mysqlsh \
     && rm -f /usr/local/bin/gosu
 COPY --from=mysql-native-tools /usr/bin/mysqlbinlog /usr/bin/mysqlbinlog
@@ -39,8 +42,12 @@ WORKDIR /var/lib/mysql
 ENTRYPOINT ["dbvault"]
 
 FROM mongo:8.0 AS mongodb
-# DBVault runs as the configured non-root user without the server entrypoint.
-RUN rm -f /usr/local/bin/gosu
+# Disable APT download retries while upgrading the vulnerable APT client.
+RUN apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
+    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends --only-upgrade \
+        apt libapt-pkg6.0t64 libpcre2-8-0 \
+    && rm -rf /var/lib/apt/lists/* /opt/js-yaml \
+    && rm -f /usr/local/bin/gosu /js-yaml.js /usr/bin/bsondump
 COPY --from=build /dbvault /usr/local/bin/dbvault
 USER mongodb
 WORKDIR /data/db
@@ -52,9 +59,11 @@ WORKDIR /tmp
 ENTRYPOINT ["/usr/local/bin/dbvault"]
 
 # Client major must match the backup server major under DBVault's policy.
-FROM postgres:16-bookworm AS postgres
-# DBVault runs as the configured non-root user without the server entrypoint.
-RUN rm -f /usr/local/bin/gosu
+FROM postgres:16-trixie AS postgres
+RUN apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
+    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends --only-upgrade apt zlib1g \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /usr/local/bin/gosu
 COPY --from=build /dbvault /usr/local/bin/dbvault
 USER postgres
 WORKDIR /var/lib/postgresql

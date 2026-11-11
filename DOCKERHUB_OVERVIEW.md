@@ -8,9 +8,9 @@ Choose the tag for your database engine:
 
 | Tag | Included database tools |
 | --- | --- |
-| `postgres` | PostgreSQL 16 |
-| `mysql` | MySQL 8.4 |
-| `mongodb` | MongoDB 8.0 and Database Tools |
+| `postgres` | PostgreSQL 16 client tools |
+| `mysql` | MySQL 8.4 client tools |
+| `mongodb` | `mongodump` and `mongorestore` from the MongoDB 8.0 base image |
 | `sqlite` | SQLite; no external database client required |
 
 ## Pull an image

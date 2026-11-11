@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Refresh glibc in the MySQL runtime image and APT and PCRE2 in the
+  MongoDB runtime image. Remove MongoDB's unused `bsondump` and server
+  startup YAML parser from the DBVault image.
+- Move the PostgreSQL client image to the official PostgreSQL 16 Trixie
+  base and apply Debian's APT and zlib updates. PostgreSQL client tools
+  remain on major version 16.
+
 ## [v0.9.1] - 2026-11-11
 
 ### Security

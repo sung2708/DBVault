@@ -24,7 +24,8 @@ maintainers push a release tag. Native database tools are not included in those
 archives. Docker runtime targets provide PostgreSQL client 16, MySQL 8.4 clients,
 MongoDB Database Tools, or embedded SQLite. Choose the target for your engine.
 The MySQL image ships `mysql`, `mysqldump` and `mysqlbinlog` for DBVault's
-workflows. As of `v0.9.1`, it omits MySQL Shell (`mysqlsh`).
+workflows. As of `v0.9.1`, it omits MySQL Shell (`mysqlsh`). The MongoDB image
+uses `mongodump` and `mongorestore` for backup and restore.
 
 ## Install with Go
 
@@ -173,10 +174,13 @@ is required. Both source and restore destination files must already exist.
 ### 3.5 Docker targets
 
 `docker build --target postgres -t dbvault:postgres .` builds the default image.
-Use `--target mysql`, `mongodb` or `sqlite` for other engines. Native client
-versions are tied to their base image: PostgreSQL 16, MySQL 8.4, MongoDB 8.0
-Database Tools. Every runtime uses a non-root user. Mount a config, private
-backup directory and any SQLite database with permissions for that user.
+Use `--target mysql`, `mongodb` or `sqlite` for other engines. The current
+Dockerfile builds the PostgreSQL 16 client image on Debian Trixie. MySQL
+uses 8.4 clients and MongoDB uses Database Tools from the MongoDB 8.0 base.
+For an existing MongoDB backup, use a restore tool matching the exact tools
+version recorded in its manifest. Every runtime uses a non-root user. Mount
+a config, private backup directory and any SQLite database with permissions
+for that user.
 Set credentials by environment variable name/secret injection. The new release
 workflow publishes Linux amd64/arm64 images to GHCR after binary release success.
 The first container release is `v0.4.0`; images become available only after its
@@ -188,6 +192,24 @@ stage with a named context:
 `docker build --build-context build=bin/linux-amd64 --target postgres -t dbvault:postgres .`
 The context directory must contain the executable named `dbvault` for the image's
 architecture. This route was used to smoke-test all four final runtime targets.
+
+#### Container security updates
+
+The current Dockerfile applies available vendor updates to MySQL glibc,
+MongoDB APT/PCRE2, and PostgreSQL zlib. It removes the MongoDB server startup
+YAML parser and the unused `bsondump` executable. Published `v0.9.1` images
+precede these Dockerfile changes.
+
+A local SBOM scan on 2026-11-11 found zero advisories in the updated MySQL
+amd64 image. Updated PostgreSQL 16 Trixie images on amd64 and arm64 still
+reported eight High advisories in Kerberos and libxml2. The Debian tracker
+lists those packages as affected in Trixie. See the
+[libxml2 advisory](https://security-tracker.debian.org/tracker/CVE-2026-86140).
+
+MongoDB's retained Database Tools also embed older x/net and x/crypto
+modules. Removing `bsondump` alone does not update `mongodump` or
+`mongorestore`. Existing backups require matching tools versions.
+Scan each final image digest to assess the packages actually shipped.
 
 #### Versioned registry images (`v0.4.0` and later)
 
