@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Build with the Go 1.26.11 toolchain instead of Go 1.26.0, picking up
+  standard-library security fixes (`crypto/tls`, `crypto/x509`, `net/http`,
+  `os`). The minimum `go` version stays 1.26.0.
+
 ## [v0.8.0] - 2026-11-09
 
 ### Changed

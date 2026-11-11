@@ -2,6 +2,8 @@ module github.com/sung2708/DBVault
 
 go 1.26.0
 
+toolchain go1.26.11
+
 require (
 	cloud.google.com/go/storage v1.68.0
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
