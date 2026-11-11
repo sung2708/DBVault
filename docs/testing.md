@@ -358,3 +358,21 @@ absent. Create and verify an encrypted backup with the published v0.6.0 binary,
 then verify and restore that same backup with the candidate. Check the saved
 schedule list with both binaries and smoke-test candidate images by digest on
 Linux amd64 and arm64.
+
+
+### Packaged client compatibility
+
+`bash scripts/test-container-clients.sh postgres IMAGE` restores an upstream
+PostgreSQL 16 custom archive with the packaged client, restores a packaged-client
+archive with the upstream client, compares the data and runs a streaming-WAL
+`pg_basebackup`. The database server runs in a temporary container.
+
+`bash scripts/test-container-clients.sh mongodb IMAGE` restores an upstream
+MongoDB Database Tools archive with the packaged tools, then restores their
+archive with upstream tools and checks a Unicode record. This checks the
+same-source 100.20.0 rebuild against existing archives. The script cleans up
+its own server container and anonymous volumes on exit.
+
+The container CI matrix runs both checks on Linux amd64 and arm64. Smoke
+checks also verify UID/GID 999, required native executables, removal of
+unused server tools, and minimum patched runtime library versions.

@@ -124,13 +124,14 @@ jobs:
                 test ! -e /usr/bin/bsondump
                 test ! -e /js-yaml.js
                 test ! -d /opt/js-yaml
-                installed=$(dpkg-query -W apt | cut -f2)
-                dpkg --compare-versions "$installed" ge 2.8.4ubuntu0.1
-                installed=$(dpkg-query -W libpcre2-8-0 | cut -f2)
-                dpkg --compare-versions "$installed" ge 10.42-4ubuntu2.2
-              elif [ "$1" = postgres ]; then
-                installed=$(dpkg-query -W zlib1g | cut -f2)
-                dpkg --compare-versions "$installed" ge 1:1.3.dfsg+really1.3.1-1+deb13u1
+              fi
+              if [ "$1" = mongodb ] || [ "$1" = postgres ]; then
+                test "$(id -u)" = 999
+                test "$(id -g)" = 999
+                test "$(apk version -t "$(apk info -v | grep "^musl-" | sed s/musl-//)" 1.2.6-r3)" != "<"
+                test "$(apk version -t "$(apk info -v | grep "^krb5-libs-" | sed s/krb5-libs-//)" 1.22.3-r0)" != "<"
+                test ! -e /usr/bin/mongod
+                test ! -e /usr/local/bin/postgres
               fi
             ' sh "$ENGINE"
             case "$ENGINE" in
@@ -142,3 +143,6 @@ jobs:
           else
             test "$(docker image inspect --format '{{.Config.User}}' dbvault:smoke)" = 65532
           fi
+      - name: Restore archives across upstream and packaged clients
+        if: matrix.target == 'postgres' || matrix.target == 'mongodb'
+        run: bash scripts/test-container-clients.sh ${{ matrix.target }} dbvault:smoke

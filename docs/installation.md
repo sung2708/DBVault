@@ -1,10 +1,9 @@
 # Installation Guide
 
-Version `v0.9.1` updates Go dependencies and removes unused tools from the
-database client images. Install this version explicitly:
+Version `v0.9.2` packages updated database clients and runtime libraries. Install this version explicitly:
 
 ```bash
-go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.1
+go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.2
 ```
 
 Binary/container assets become available after the release workflow succeeds.
@@ -175,8 +174,10 @@ is required. Both source and restore destination files must already exist.
 
 `docker build --target postgres -t dbvault:postgres .` builds the default image.
 Use `--target mysql`, `mongodb` or `sqlite` for other engines. The current
-Dockerfile builds the PostgreSQL 16 client image on Debian Trixie. MySQL
-uses 8.4 clients and MongoDB uses Database Tools from the MongoDB 8.0 base.
+Dockerfile builds the PostgreSQL 16 and MongoDB client images on Alpine 3.24.
+PostgreSQL clients come from the official PostgreSQL 16 Alpine image.
+MongoDB uses a DBVault rebuild of Database Tools 100.20.0 with patched
+x/net and x/crypto dependencies. MySQL uses Oracle MySQL 8.4 clients.
 For an existing MongoDB backup, use a restore tool matching the exact tools
 version recorded in its manifest. Every runtime uses a non-root user. Mount
 a config, private backup directory and any SQLite database with permissions
@@ -195,25 +196,27 @@ architecture. This route was used to smoke-test all four final runtime targets.
 
 #### Container security updates
 
-The current Dockerfile applies available vendor updates to MySQL glibc,
-MongoDB APT/PCRE2, and PostgreSQL zlib. It removes the MongoDB server startup
-YAML parser and the unused `bsondump` executable. Published `v0.9.1` images
-precede these Dockerfile changes.
+The current Dockerfile retains UID/GID 999 for PostgreSQL and MongoDB and
+includes the four PostgreSQL clients (`pg_dump`, `pg_restore`, `psql`,
+`pg_basebackup`) and two MongoDB clients (`mongodump`, `mongorestore`).
+PostgreSQL clients keep TLS, LDAP, GSSAPI, gzip, LZ4 and Zstandard support.
+MongoDB clients are built with CGO and the upstream `gssapi,failpoints` tags.
+Both runtimes include CA certificates and timezone data.
 
-A local SBOM scan on 2026-11-11 found zero advisories in the updated MySQL
-amd64 image. Updated PostgreSQL 16 Trixie images on amd64 and arm64 still
-reported eight High advisories in Kerberos and libxml2. The Debian tracker
-lists those packages as affected in Trixie. See the
-[libxml2 advisory](https://security-tracker.debian.org/tracker/CVE-2026-86140).
+The MongoDB Tools rebuild starts from upstream source commit
+`7536fd7f3d67f5115de3eb2e271b327b7ce329b9` (100.20.0), verified by SHA-256
+in the Dockerfile. Its Go dependencies use x/net 0.62.0 and x/crypto
+`v0.58.1-0.20261009181718-2f1f834330b2`. The reported source commit ends
+with `-dbvault` to identify the rebuild. The archive tool version stays
+100.20.0. CI tests archive restore in both directions with upstream tools.
+The runtime includes the Kerberos libraries required by GSSAPI.
 
-MongoDB's retained Database Tools also embed older x/net and x/crypto
-modules. Removing `bsondump` alone does not update `mongodump` or
-`mongorestore`. Existing backups require matching tools versions.
-The updated MongoDB image returned one High, 20 Medium, three Low and one
-Unspecified advisory on both amd64 and arm64. The High is
-[CVE-2026-78661](https://pkg.go.dev/vuln/GO-2026-6860) in the upstream
-Tools x/net dependency. Scan each final image digest to assess the packages
-actually shipped.
+Docker Scout may report CVE-2026-107891 against musl 1.2.6-r3 by applying
+the edge branch's r6 threshold. Alpine's security tracker confirms that
+the 3.24 branch is fixed in 1.2.6-r3. CI checks this branch's minimum
+version. See the [Alpine advisory](https://security.alpinelinux.org/vuln/CVE-2026-107891).
+Scan each final image digest because advisory data changes over time.
+These client runtime changes start with `v0.9.2`.
 
 #### Versioned registry images (`v0.4.0` and later)
 

@@ -41,14 +41,37 @@ USER mysql
 WORKDIR /var/lib/mysql
 ENTRYPOINT ["dbvault"]
 
-FROM mongo:8.0 AS mongodb
-# Disable APT download retries while upgrading the vulnerable APT client.
-RUN apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
-    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends --only-upgrade \
-        apt libapt-pkg6.0t64 libpcre2-8-0 \
-    && rm -rf /var/lib/apt/lists/* /opt/js-yaml \
-    && rm -f /usr/local/bin/gosu /js-yaml.js /usr/bin/bsondump
+FROM golang:1.26-alpine3.24 AS mongodb-tools
+RUN apk add --no-cache build-base krb5-dev curl
+WORKDIR /tools
+# Preserve the archive format/tool version used by existing backups.
+RUN curl --fail --location --retry 3 \
+        https://codeload.github.com/mongodb/mongo-tools/tar.gz/7536fd7f3d67f5115de3eb2e271b327b7ce329b9 \
+        -o source.tar.gz \
+    && echo "cf456aea0f97ed79b52e3f920fba23516a1a458e2416f3a4e1022a5e35b73bfb  source.tar.gz" | sha256sum -c - \
+    && tar -xzf source.tar.gz --strip-components=1 \
+    && rm source.tar.gz
+ENV GOFLAGS=-mod=mod
+RUN set -eu; \
+    go get golang.org/x/net@v0.62.0 golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 \
+    && for tool in mongodump mongorestore; do \
+        CGO_ENABLED=1 go build -p 2 -trimpath -buildmode=pie -tags=gssapi,failpoints \
+            -ldflags "-s -w -X main.VersionStr=100.20.0 -X main.GitCommit=7536fd7f3d67f5115de3eb2e271b327b7ce329b9-dbvault" \
+            -o /out/$tool ./$tool/main/$tool.go; \
+       done
+
+FROM alpine:3.24 AS mongodb
+RUN apk upgrade --no-cache \
+    && apk add --no-cache ca-certificates krb5-libs tzdata \
+    && delgroup ping \
+    && addgroup -g 999 -S mongodb \
+    && adduser -u 999 -S -D -H -G mongodb -h /data/db mongodb \
+    && mkdir -p /data/db \
+    && chown mongodb:mongodb /data/db
+COPY --from=mongodb-tools /out/mongodump /out/mongorestore /usr/bin/
+COPY --from=mongodb-tools /tools/LICENSE.md /usr/share/licenses/mongodb-tools/LICENSE.md
 COPY --from=build /dbvault /usr/local/bin/dbvault
+ENV HOME=/data/db
 USER mongodb
 WORKDIR /data/db
 ENTRYPOINT ["dbvault"]
@@ -59,12 +82,21 @@ WORKDIR /tmp
 ENTRYPOINT ["/usr/local/bin/dbvault"]
 
 # Client major must match the backup server major under DBVault's policy.
-FROM postgres:16-trixie AS postgres
-RUN apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
-    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends --only-upgrade apt zlib1g \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -f /usr/local/bin/gosu
+FROM postgres:16-alpine3.24 AS postgres-tools
+
+FROM alpine:3.24 AS postgres
+RUN apk upgrade --no-cache \
+    && apk add --no-cache ca-certificates krb5-libs libldap libedit libssl3 libcrypto3 \
+        lz4-libs zstd-libs zlib tzdata \
+    && delgroup ping \
+    && addgroup -g 999 -S postgres \
+    && adduser -u 999 -S -D -H -G postgres -h /var/lib/postgresql postgres \
+    && mkdir -p /var/lib/postgresql /var/run/postgresql \
+    && chown postgres:postgres /var/lib/postgresql /var/run/postgresql
+COPY --from=postgres-tools /usr/local/bin/pg_dump /usr/local/bin/pg_restore /usr/local/bin/psql /usr/local/bin/pg_basebackup /usr/local/bin/
+COPY --from=postgres-tools /usr/local/lib/libpq.so* /usr/local/lib/
 COPY --from=build /dbvault /usr/local/bin/dbvault
+ENV HOME=/var/lib/postgresql
 USER postgres
 WORKDIR /var/lib/postgresql
 ENTRYPOINT ["dbvault"]

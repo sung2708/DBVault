@@ -9,13 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.2] - 2026-11-11
+
 ### Security
-- Refresh glibc in the MySQL runtime image and APT and PCRE2 in the
-  MongoDB runtime image. Remove MongoDB's unused `bsondump` and server
-  startup YAML parser from the DBVault image.
-- Move the PostgreSQL client image to the official PostgreSQL 16 Trixie
-  base and apply Debian's APT and zlib updates. PostgreSQL client tools
-  remain on major version 16.
+- Package PostgreSQL 16 client tools in an updated Alpine 3.24 runtime with
+  TLS, LDAP, GSSAPI and compression libraries. Exclude server-only libraries
+  and apply the distribution's Kerberos, musl and zlib security updates.
+- Rebuild MongoDB Database Tools 100.20.0 from checksum-verified upstream
+  source with patched x/net and x/crypto dependencies. Preserve GSSAPI support,
+  the source tool version and UID/GID 999 for existing backup compatibility.
+- Add CI tests that restore upstream PostgreSQL/MongoDB archives with the
+  packaged tools and restore their output with upstream tools on both
+  Linux architectures.
 
 ## [v0.9.1] - 2026-11-11
 

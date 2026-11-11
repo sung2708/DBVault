@@ -10,7 +10,7 @@ Choose the tag for your database engine:
 | --- | --- |
 | `postgres` | PostgreSQL 16 client tools |
 | `mysql` | MySQL 8.4 client tools |
-| `mongodb` | `mongodump` and `mongorestore` from the MongoDB 8.0 base image |
+| `mongodb` | MongoDB Database Tools `mongodump` and `mongorestore` |
 | `sqlite` | SQLite; no external database client required |
 
 ## Pull an image
