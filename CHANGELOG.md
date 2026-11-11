@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Interactive restore lists backups in aligned columns (created, source, type,
   encryption, stored size, name) that fit the terminal width, shows at most ten
-  rows and filters with `/`.
+  rows and filters with `/`, including full backup names shortened on screen.
+  Backup selection reports when storage is loading and keeps the selected
+  storage configuration through execution.
 - The interactive restore plan uses labeled fields, omits empty selectors and
   highlights `--clean` as a warning.
 - Interactive restores into an existing destination require typing the

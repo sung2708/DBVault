@@ -13,22 +13,31 @@ import (
 	"time"
 )
 
-func (o *options) selectRestore(c *cobra.Command) error {
+func (o *options) selectRestore(c *cobra.Command) (*config.Config, error) {
 	target, _ := c.Flags().GetString("target")
 	interactive, _ := c.Flags().GetBool("interactive")
 	nonInteractive, _ := c.Flags().GetBool("non-interactive")
 	allowed := presentation.CanPrompt(c.InOrStdin(), c.ErrOrStderr(), nonInteractive, jsonMode(c), globalBool(c, "quiet"))
 	if interactive && !allowed {
-		return fmt.Errorf("--interactive requires terminal input/output and text mode; provide --target and destination flags instead")
+		return nil, fmt.Errorf("--interactive requires terminal input/output and text mode; provide --target and destination flags instead")
 	}
 	if !interactive && (target != "" || !allowed) {
-		return nil
+		return nil, nil
 	}
 	cfg, items, err := o.listForPicker(c)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return o.promptRestore(c, o.terminalPrompter(c), cfg, items)
+	if err := o.promptRestore(c, o.terminalPrompter(c), cfg, items); err != nil {
+		return nil, err
+	}
+	if c.Flags().Changed("database") {
+		cfg.Database.Database, _ = c.Flags().GetString("database")
+		if err := cfg.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	return &cfg, nil
 }
 
 func (o *options) promptRestore(c *cobra.Command, p onboarding.Prompter, cfg config.Config, items []metadata.Manifest) error {

@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/sung2708/DBVault/internal/app"
@@ -25,17 +24,17 @@ const (
 // when --target is omitted, under the same prompt policy as restore. Machine
 // output, quiet mode, non-terminals and --non-interactive keep the existing
 // "--target is required" error.
-func (o *options) selectTarget(c *cobra.Command, name string) error {
+func (o *options) selectTarget(c *cobra.Command, name string) (*config.Config, error) {
 	target, _ := c.Flags().GetString("target")
 	nonInteractive, _ := c.Flags().GetBool("non-interactive")
 	if target != "" || !presentation.CanPrompt(c.InOrStdin(), c.ErrOrStderr(), nonInteractive, jsonMode(c), globalBool(c, "quiet")) {
-		return nil
+		return nil, nil
 	}
-	_, items, err := o.listForPicker(c)
+	cfg, items, err := o.listForPicker(c)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return promptTarget(c, o.terminalPrompter(c), name, items)
+	return &cfg, promptTarget(c, o.terminalPrompter(c), name, items)
 }
 
 func promptTarget(c *cobra.Command, p onboarding.Prompter, name string, items []metadata.Manifest) error {
@@ -103,7 +102,11 @@ func (o *options) listForPicker(c *cobra.Command) (config.Config, []metadata.Man
 	if err != nil {
 		return cfg, nil, err
 	}
-	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+	ctx, cancel, err := operationContext(c)
+	if err != nil {
+		return cfg, nil, err
+	}
+	o.terminalPrompter(c).Message("Loading backups from configured storage...")
 	defer cancel()
 	store, closeStore, err := providers.Open(ctx, cfg.Storage)
 	if err != nil {

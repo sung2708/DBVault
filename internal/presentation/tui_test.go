@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sung2708/DBVault/internal/app"
 	"github.com/sung2708/DBVault/internal/metadata"
@@ -56,6 +58,27 @@ func TestBackupChoicesAlignAndFitWidth(t *testing.T) {
 	choices := BackupChoices(items, 30, false).Choices
 	if !strings.Contains(choices[1].Label, "orders_") || !strings.Contains(choices[1].Label, "...") {
 		t.Fatal(choices[1].Label)
+	}
+}
+
+func TestBackupPickerFiltersByFullName(t *testing.T) {
+	name := "orders_" + strings.Repeat("middle_", 16) + "archive.dump.gz"
+	picker := BackupChoices([]metadata.Manifest{{Name: "other.dump.gz"}, {Name: name}}, 80, true)
+	p := &TerminalPrompter{}
+	selected := picker.Choices[0].Value
+	field := p.backupSelect("Choose backup", picker.Choices, &selected)
+	field.WithWidth(80)
+	field.WithKeyMap(huh.NewDefaultKeyMap())
+	field.Focus()
+	field.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	field.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(name), Paste: true})
+	field.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	field.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if selected != name {
+		t.Fatalf("selected %q, want %q", selected, name)
+	}
+	if _, rows, _ := strings.Cut(field.View(), "\n"); !strings.Contains(rows, picker.Choices[1].Label) || strings.Contains(rows, name) {
+		t.Fatalf("unexpected option display: %q", rows)
 	}
 }
 

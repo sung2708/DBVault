@@ -98,7 +98,7 @@ func (p *TerminalPrompter) SelectList(ctx context.Context, title, header string,
 	if os.Getenv("TERM") == "dumb" {
 		return p.numberedSelect(ctx, title, header, choices, value)
 	}
-	field := huh.NewSelect[string]().Title(title + " (/ to filter)").Options(p.options(choices)...).Value(&value)
+	field := p.backupSelect(title, choices, &value)
 	if header != "" {
 		// The description sits between the title and the options, two
 		// columns in, so it lines up with labels after the "> " selector.
@@ -107,7 +107,29 @@ func (p *TerminalPrompter) SelectList(ctx context.Context, title, header string,
 	if height > 0 {
 		field.Height(height)
 	}
-	return value, p.run(ctx, field)
+	err := p.run(ctx, field)
+	return value, err
+}
+
+// Huh filters the entire key. The width-limited first line is the visible row.
+func (p *TerminalPrompter) backupSelect(title string, choices []onboarding.Choice, value *string) *huh.Select[string] {
+	options := make([]huh.Option[string], len(choices))
+	for i, choice := range choices {
+		options[i] = huh.NewOption(p.clean(choice.Label)+"\n"+p.clean(choice.Value), choice.Value)
+	}
+	label := func(key string) string {
+		text, _, _ := strings.Cut(key, "\n")
+		return text
+	}
+	theme := p.theme()
+	theme.Focused.SelectedOption = theme.Focused.SelectedOption.Transform(label)
+	theme.Focused.UnselectedOption = theme.Focused.UnselectedOption.Transform(label)
+	theme.Blurred = theme.Focused
+	const hint = " (/ to filter)"
+	title = TruncateMiddle(p.clean(title), max(1, Detect(p.Out).Width-len(hint)-1), "...")
+	field := huh.NewSelect[string]().Title(title + hint).Options(options...).Value(value)
+	field.WithTheme(theme)
+	return field
 }
 
 func (p *TerminalPrompter) options(choices []onboarding.Choice) []huh.Option[string] {

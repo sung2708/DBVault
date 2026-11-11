@@ -192,16 +192,31 @@ func (o *options) command(name string) *cobra.Command {
 	c.RunE = func(c *cobra.Command, _ []string) error { err := o.run(c, name); return o.redactor.Error(err) }
 	return c
 }
+func operationContext(c *cobra.Command) (context.Context, context.CancelFunc, error) {
+	if c.Flags().Lookup("timeout") != nil {
+		duration, _ := c.Flags().GetDuration("timeout")
+		if duration < 0 {
+			return nil, nil, fmt.Errorf("--timeout must be nonnegative")
+		}
+		if duration > 0 {
+			ctx, cancel := context.WithTimeout(c.Context(), duration)
+			return ctx, cancel, nil
+		}
+	}
+	return c.Context(), func() {}, nil
+}
+
 func (o *options) run(c *cobra.Command, name string) error {
+	var selectedConfig *config.Config
+	var err error
 	switch name {
 	case "restore":
-		if err := o.selectRestore(c); err != nil {
-			return err
-		}
+		selectedConfig, err = o.selectRestore(c)
 	case "export", "verify", "inspect", "delete":
-		if err := o.selectTarget(c, name); err != nil {
-			return err
-		}
+		selectedConfig, err = o.selectTarget(c, name)
+	}
+	if err != nil {
+		return err
 	}
 	target, _ := c.Flags().GetString("target")
 	confirm, _ := c.Flags().GetBool("confirm")
@@ -219,25 +234,23 @@ func (o *options) run(c *cobra.Command, name string) error {
 	if (name == "list" || name == "history") && limit < 1 {
 		return fmt.Errorf("--limit must be positive")
 	}
-	ctx := c.Context()
-	if c.Flags().Lookup("timeout") != nil {
-		duration, _ := c.Flags().GetDuration("timeout")
-		if duration < 0 {
-			return fmt.Errorf("--timeout must be nonnegative")
-		}
-		if duration > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, duration)
-			defer cancel()
-		}
+	ctx, cancel, err := operationContext(c)
+	if err != nil {
+		return err
 	}
+	defer cancel()
 	display := o.display(c)
 	stopDisplay := display.Start(ctx)
 	defer stopDisplay()
 	details := presentation.Details{Operation: name, Target: target, ConfigPath: o.configPath, DryRun: dry, Started: time.Now()}
 	display.Configure(details, o.redactor)
 	display.Step("configuration")
-	cfg, err := o.load(c)
+	var cfg config.Config
+	if selectedConfig == nil {
+		cfg, err = o.load(c)
+	} else {
+		cfg = *selectedConfig
+	}
 	if err == nil && name == "restore" {
 		newDB, _ := c.Flags().GetBool("new-database")
 		if newDB && !c.Flags().Changed("database") {

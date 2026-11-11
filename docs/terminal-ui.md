@@ -19,6 +19,9 @@ destinations (see [restore workflows](restore-workflows.md#terminal-selection-an
 Without color the warning keeps a `[WARN]` marker. `export`, `inspect`,
 `verify` and `delete` reuse the backup picker when `--target` is omitted, under
 the same prompt policy; a picked deletion still asks for confirmation.
+Paste a full backup name after `/` even if the row shortens it. While storage
+loads the list, Ctrl+C cancels. When a command supports `--timeout`, that
+limit applies separately to listing and to the operation after selection.
 
 Both stdin and stderr must be terminals to prompt. Complete required flags,
 `--non-interactive`, JSON and quiet mode bypass prompts. `--no-color` and
