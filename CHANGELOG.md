@@ -10,11 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Replace the archived `gopkg.in/yaml.v3` with its maintained drop-in fork
+  `go.yaml.in/yaml/v3`. Written configuration files are byte-identical.
+- Update AWS, Google Cloud, Azure, MongoDB driver, SQLite and other direct
+  dependencies to their latest patch and minor releases.
 - Run `govulncheck` in CI, update CI and release workflows to current GitHub
   Actions majors, and enable weekly Dependabot updates for Go modules,
   GitHub Actions and Docker base images.
 
 ### Security
+- Update dependencies with known vulnerabilities reachable from DBVault:
+  `klauspost/compress` 1.20.4, `golang.org/x/net` 0.62.0, `google.golang.org/grpc`
+  1.85.0 and `go.opentelemetry.io/otel/sdk` 1.47.0.
 - Build with the Go 1.26.11 toolchain instead of Go 1.26.0, picking up
   standard-library security fixes (`crypto/tls`, `crypto/x509`, `net/http`,
   `os`). The minimum `go` version stays 1.26.0.

@@ -1,0 +1,46 @@
+encryption:
+    key_id: primary
+    keys:
+        old: DBVAULT_KEY_OLD
+        primary: DBVAULT_KEY_PRIMARY
+version: "1"
+database:
+    type: postgres
+    host: db.internal
+    port: 5432
+    user: backup
+    password_env: PGPASSWORD
+    database: 'orders: prod'
+    ssl_mode: require
+    options:
+        include_tables:
+            - public.orders
+            - public.items
+    tools:
+        pg_dump: /usr/lib/postgresql/16/bin/pg_dump
+        pg_restore: /usr/lib/postgresql/16/bin/pg_restore
+storage:
+    type: s3
+    s3:
+        bucket: backups
+        region: eu-west-1
+        prefix: prod/orders
+        access_key_env: AWS_ACCESS_KEY_ID
+        secret_key_env: AWS_SECRET_ACCESS_KEY
+        encryption: aws:kms
+        kms_key_id: alias/dbvault
+compression:
+    type: zstd
+    level: 3
+retention:
+    keep_days: 30
+    keep_count: 10
+health:
+    max_backup_age: 26h
+protection:
+    verify_after_backup: true
+notifications:
+    slack:
+        enabled: true
+        webhook_url_env: SLACK_WEBHOOK_URL
+        channel: '#ops'

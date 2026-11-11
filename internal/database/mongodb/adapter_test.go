@@ -6,7 +6,7 @@ import (
 	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/database"
 	runner "github.com/sung2708/DBVault/internal/exec"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 	"io"
 	"os"
 	"strings"
