@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `go.yaml.in/yaml/v3`. Written configuration files are byte-identical.
 - Update AWS, Google Cloud, Azure, MongoDB driver, SQLite and other direct
   dependencies to their latest patch and minor releases.
+- Correct stale documentation: the capability matrix now lists logical
+  incremental chains and native `pitr` increments, and the roadmap and README
+  describe the current release state.
 - Run `govulncheck` in CI, update CI and release workflows to current GitHub
   Actions majors, and enable weekly Dependabot updates for Go modules,
   GitHub Actions and Docker base images.

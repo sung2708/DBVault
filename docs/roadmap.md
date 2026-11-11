@@ -9,9 +9,12 @@ This document outlines the phased development roadmap for DBVault, based on an a
 The repository implements all four database engines and storage providers,
 Slack, retention and persistent cron schedules. See
 [verified status](implementation-status.md) for executed checks.
-Version v0.6.0 includes native WAL/binlog/oplog recovery chains, KMS/Vault key
-providers, native scheduling/retention and independent freshness monitoring.
-Differential backups and live-cloud validation remain future milestones. See
+Releases through v0.8.0 include logical incremental chains, native
+WAL/binlog/oplog recovery chains, client-side and KMS/Vault envelope encryption,
+native scheduling/retention, a Prometheus metrics exporter, independent
+freshness monitoring and safer backup publication. Differential backups,
+cross-timeline PostgreSQL recovery, published-image validation and live-cloud
+validation remain future milestones. See
 [logical delta chains and encrypted recovery operations](enhancements.md),
 [native PITR](pitr.md) and [independent monitoring](independent-monitoring.md).
 
@@ -27,6 +30,18 @@ Differential backups and live-cloud validation remain future milestones. See
 - [x] PostgreSQL recovery drills in new Docker-isolated servers (`v0.4.0`).
 - [x] MySQL/MongoDB recovery drills in new isolated Docker servers with fresh
   credentials, structural validation and real integration coverage.
+
+### v0.9.0 (in preparation)
+
+- [x] Go 1.26.11 toolchain for standard-library security fixes, `govulncheck`
+  in CI and Dependabot for Go modules, GitHub Actions and Docker images.
+- [x] Maintained `go.yaml.in/yaml/v3` YAML library with byte-identical
+  configuration output, and current patch/minor dependencies.
+- [x] Interactive restore: aligned, filterable backup picker, labeled restore
+  plan with `--clean` warning, typed destination-name confirmation for existing
+  destinations, and progress throughput/ETA.
+- [ ] Reuse the backup picker for `delete`, `export`, `inspect` and `verify`.
+- [ ] Charm v2 (Huh/Lip Gloss) migration (planned for v0.10).
 
 ### Available in Phase 0:
 - [x] Comprehensive architectural blueprint and pipeline design.
