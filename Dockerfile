@@ -34,7 +34,7 @@ USER mysql
 WORKDIR /var/lib/mysql
 ENTRYPOINT ["dbvault"]
 
-FROM mongo:8.0 AS mongodb
+FROM mongo:8.3 AS mongodb
 COPY --from=build /dbvault /usr/local/bin/dbvault
 USER mongodb
 WORKDIR /data/db
