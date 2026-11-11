@@ -29,7 +29,9 @@ RUN microdnf --disablerepo='*' --enablerepo=ol9_baseos_latest install -y cpio \
 
 FROM mysql:8.4 AS mysql
 # DBVault runs as mysql directly and uses the classic clients.
-RUN rpm -e mysql-shell && rm -f /usr/local/bin/gosu
+RUN rpm -e mysql-shell \
+    && rm -rf /usr/lib/mysqlsh \
+    && rm -f /usr/local/bin/gosu
 COPY --from=mysql-native-tools /usr/bin/mysqlbinlog /usr/bin/mysqlbinlog
 COPY --from=build /dbvault /usr/local/bin/dbvault
 USER mysql
