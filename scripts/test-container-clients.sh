@@ -4,7 +4,12 @@ set -euo pipefail
 engine=${1:?engine required}
 image=${2:?client image required}
 server="dbvault-client-test-${engine}-$$"
-trap 'docker rm -fv "$server" >/dev/null 2>&1 || true' EXIT
+cleanup() {
+  local status=$?
+  if [ "$status" != 0 ]; then docker logs "$server" >&2 || true; fi
+  docker rm -fv "$server" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 client() {
   local tool=$1

@@ -85,7 +85,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        # MongoDB 8.0 rejects Linux kernels 6.19 through 7.0.13.
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
         target: [postgres, mysql, mongodb, sqlite]
     runs-on: ${{ matrix.runner }}
     steps:
