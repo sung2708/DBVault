@@ -80,17 +80,29 @@ dbvault restore --interactive           # Explicitly request terminal selection
 dbvault restore --target BACKUP-NAME --non-interactive --dry-run --output json
 ```
 
-Selections show backup creation time, source database, stored size and filename.
-Use arrows or j/k, Enter to select, Esc/Ctrl+C to cancel. New destination is the
-default; choosing an existing destination offers a safety backup. Confirmation
-defaults to cancel and displays host, DB, clean/drop behavior and selectors.
-Explicit `--confirm` already authorizes the operation.
+The backup picker shows aligned columns: creation time (UTC), engine/database,
+backup type (full/incremental), whether the backup is encrypted, stored size and
+name. When every backup comes from the same database, that source moves into the
+title. At most ten rows are visible at once; press `/` to filter by typed text.
+Narrow terminals give up the source, encryption, type and size columns in that
+order and shorten long names in the middle; the name itself is always shown.
+Use arrows or j/k, Enter to select, Esc/Ctrl+C to cancel.
+
+New destination is the default; choosing an existing destination offers a safety
+backup. A labeled restore plan then shows the backup, source, destination, mode,
+safety backup and any table/schema/collection selectors; `--clean` adds a
+highlighted warning. A new destination is confirmed with yes/no, defaulting to
+cancel. Restoring into an existing destination requires typing the destination
+database name (SQLite: the file name, without its directory); any other text
+cancels without writing. Explicit `--confirm` already authorizes the operation
+and skips the confirmation prompt, for automation as before.
 
 JSON, quiet, non-terminal and `--non-interactive` invocations never prompt;
 `--interactive` in these modes fails with an actionable error. Explicit targets
 without `--interactive` keep the script-compatible flags/confirmation contract.
-Text output shows the plan and actual pipeline stages; percentages are shown
-only when a byte total is known. Stream consumption progress is not an estimate
+Text output shows the plan and actual pipeline stages; percentages, a progress
+bar and an ETA are shown only when a byte total is known. After the first two
+seconds of a stage the line also shows smoothed throughput of consumed bytes. Stream consumption progress is not an estimate
 of server-side restore completion. JSON writes one structured result to stdout,
 with diagnostics on stderr. `--no-color` and `NO_COLOR` remain supported.
 

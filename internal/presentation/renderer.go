@@ -41,6 +41,10 @@ type Renderer struct {
 	bytes, total       int64
 	stageStart         time.Time
 	frame              int
+	// Smoothed bytes/second for the active stage and its last sample point.
+	rate        float64
+	sampleAt    time.Time
+	sampleBytes int64
 }
 
 func New(out, err io.Writer, o Options) *Renderer {

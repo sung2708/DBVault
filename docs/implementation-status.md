@@ -221,6 +221,11 @@ exact data comparison and post-restore validation. Native engines fail closed
 until proven target/credential isolation and corresponding actual drills exist;
 previous native restore test-harness evidence does not imply new CLI support.
 
+Later releases extended the drill CLI: PostgreSQL in new Docker-isolated servers
+(`v0.4.0`) and MySQL/MongoDB in new isolated Docker servers (`v0.6.0`). The
+table above records the `v0.3.0` state; see the [CLI reference](cli-reference.md#dbvault-recovery-drill)
+for current behavior.
+
 ### Native tool discovery during setup (`v0.3.0`)
 
 `dbvault init` now resolves a complete PostgreSQL/MySQL/MongoDB toolchain from
@@ -270,7 +275,8 @@ threshold during verification. Windows symlink tests require host privileges.
 | Full restore | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
 | Selective backup | SUPPORTED | SUPPORTED | PARTIAL | UNSUPPORTED |
 | Selective restore | SUPPORTED | UNSUPPORTED | SUPPORTED | UNSUPPORTED |
-| Incremental | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED |
+| Incremental (logical delta chain) | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
+| Native log increments (`pitr`) | SUPPORTED | SUPPORTED | SUPPORTED | UNSUPPORTED |
 | Differential | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED | UNSUPPORTED |
 | Compression | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
 | Checksum | SUPPORTED | SUPPORTED | SUPPORTED | SUPPORTED |
@@ -287,9 +293,15 @@ collections are rejected. SQLite takes a snapshot before streaming. Cloud
 providers use the common engine-independent pipeline; cloud E2E drills use
 SQLite, while native full and selected drills exercise the other three engines.
 
-Logical strategies explicitly reject incremental/differential requests.
-No full dump is relabeled as an advanced backup. Recovery chains, client-side
-encryption and a metrics exporter are future, separately scoped work.
+Incremental means logical delta chains (since v0.6.0): `backup --type
+incremental` stores a block-level delta against the verified previous dump of
+the same source, and restore reconstructs the whole chain first. Database
+adapters themselves still reject incremental/differential dump requests; the
+chain lives in the application/storage layer. Native WAL/binlog/oplog increments
+use the separate `pitr` commands (see [native operations](pitr.md)). Client-side
+encryption, managed key providers and the Prometheus metrics exporter have
+shipped since v0.6.0 (see [enhancements](enhancements.md)). Differential backups
+remain unsupported.
 
 ## Executed checks
 

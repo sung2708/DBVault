@@ -24,21 +24,21 @@ jobs:
           - target: sqlite
             suffix: sqlite
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Resolve registry name and build time
         id: image
         shell: bash
         run: |
           echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
           echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -83,7 +83,7 @@ jobs:
           fi
       - uses: docker/setup-buildx-action@v4
         if: steps.latest.outputs.promote == 'true'
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: steps.latest.outputs.promote == 'true'
         with:
           registry: docker.io
@@ -101,10 +101,10 @@ jobs:
     # MongoDB 8.0 rejects Linux kernels 6.19 through 7.0.13.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Require an intentional stable SemVer tag and prepared changelog
@@ -142,8 +142,8 @@ jobs:
           - darwin/arm64
           - windows/amd64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: go test ./...
@@ -161,7 +161,7 @@ jobs:
           cp LICENSE README.md dist/
           name="dbvault_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}"
           if [ "$GOOS" = windows ]; then (cd dist && zip "$name.zip" "dbvault$suffix" README.md LICENSE); else tar -C dist -czf "dist/$name.tar.gz" "dbvault$suffix" README.md LICENSE; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ strategy.job-index }}
           path: |
@@ -173,11 +173,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: source
           ref: ${{ github.ref }}

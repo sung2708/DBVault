@@ -69,6 +69,9 @@ func (r *Renderer) Observe(e app.Event) {
 		r.bytes = 0
 		r.total = 0
 		r.stageStart = r.options.Now()
+		r.rate = 0
+		r.sampleAt = r.stageStart
+		r.sampleBytes = 0
 		if !r.animation() {
 			fmt.Fprintln(r.err, r.status("active", stageLabel(e.Stage, false)+"...", true))
 		}
@@ -76,6 +79,7 @@ func (r *Renderer) Observe(e app.Event) {
 		if r.stage == e.Stage {
 			r.bytes = e.Bytes
 			r.total = e.Total
+			r.sample(r.options.Now())
 		}
 	case "complete":
 		r.clearLocked()
@@ -85,30 +89,101 @@ func (r *Renderer) Observe(e app.Event) {
 }
 func (r *Renderer) Step(stage string) { r.Observe(app.Event{Stage: stage, State: "start"}) }
 func (r *Renderer) Done(stage string) { r.Observe(app.Event{Stage: stage, State: "complete"}) }
+
+const (
+	// rateWindow is the minimum spacing between throughput samples; rateWeight
+	// is how much each new sample moves the smoothed rate.
+	rateWindow = 250 * time.Millisecond
+	rateWeight = 0.3
+	// Throughput and ETA stay hidden until a stage has run this long.
+	rateWarmup = 2 * time.Second
+)
+
+// sample folds consumed bytes into an exponentially smoothed rate.
+func (r *Renderer) sample(now time.Time) {
+	elapsed := now.Sub(r.sampleAt)
+	if elapsed < rateWindow || r.bytes < r.sampleBytes {
+		return
+	}
+	current := float64(r.bytes-r.sampleBytes) / elapsed.Seconds()
+	if r.rate == 0 {
+		r.rate = current
+	} else {
+		r.rate = rateWeight*current + (1-rateWeight)*r.rate
+	}
+	r.sampleAt, r.sampleBytes = now, r.bytes
+}
+
 func (r *Renderer) progressLine() string {
 	frames := []string{"|", "/", "-", "\\"}
 	if r.errCaps.Unicode {
 		frames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	}
 	label := r.safe(stageLabel(r.stage, false))
-	detail := ""
+	var counted, percent, bar, rate, eta string
 	if r.bytes > 0 {
-		detail = "  " + FormatBytes(r.bytes)
+		counted = FormatBytes(r.bytes)
+		known := r.total > 0 && r.bytes <= r.total
 		if r.total > 0 {
-			detail += " / " + FormatBytes(r.total)
-			if r.bytes <= r.total {
-				fraction := float64(r.bytes) / float64(r.total)
-				detail += fmt.Sprintf(" %d%%", int(fraction*100))
-				if r.errCaps.Width >= 72 {
-					filled := int(fraction * 10)
-					detail += " [" + strings.Repeat("#", filled) + strings.Repeat("-", 10-filled) + "]"
+			counted += " / " + FormatBytes(r.total)
+		}
+		if known {
+			fraction := float64(r.bytes) / float64(r.total)
+			percent = fmt.Sprintf("%d%%", int(fraction*100))
+			if r.errCaps.Width >= 72 {
+				filled := int(fraction * 10)
+				if r.errCaps.Unicode {
+					bar = strings.Repeat("█", filled) + strings.Repeat("░", 10-filled)
+				} else {
+					bar = "[" + strings.Repeat("#", filled) + strings.Repeat("-", 10-filled) + "]"
 				}
 			}
+		}
+		if r.rate > 0 && r.options.Now().Sub(r.stageStart) >= rateWarmup {
+			rate = FormatBytes(int64(r.rate)) + "/s"
+			if known && r.bytes < r.total {
+				if left := time.Duration(float64(r.total-r.bytes) / r.rate * float64(time.Second)); left < 100*time.Hour {
+					eta = "ETA " + formatETA(left)
+				}
+			}
+		}
+	}
+	// Keep a readable label; drop the least important details first.
+	room := r.errCaps.Width - 3 - min(16, ansi.StringWidth(label))
+	detail := ""
+	for _, parts := range [][]string{{counted, percent, bar, rate, eta}, {counted, percent, rate, eta}, {counted, percent, rate}, {counted, percent}, {counted}} {
+		detail = joinDetail(parts)
+		if ansi.StringWidth(detail) <= room {
+			break
 		}
 	}
 	width := max(1, r.errCaps.Width-3-ansi.StringWidth(detail))
 	label = ansi.Truncate(label, width, "...")
 	return frames[r.frame%len(frames)] + " " + label + detail
+}
+
+func joinDetail(parts []string) string {
+	var kept []string
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return "  " + strings.Join(kept, " ")
+}
+
+func formatETA(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
 }
 func (r *Renderer) tick(now time.Time) {
 	r.mu.Lock()

@@ -1,0 +1,14 @@
+version: "1"
+database:
+    type: sqlite
+    host: 127.0.0.1
+    database: app.db
+    ssl_mode: prefer
+storage:
+    type: local
+    local:
+        path: ./backups
+        permissions: "0700"
+compression:
+    type: gzip
+    level: 6

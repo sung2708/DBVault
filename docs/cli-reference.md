@@ -29,6 +29,12 @@ instructions; it never downloads or installs a binary.
 `dbvault inspect --target KEY` reads validated metadata without hashing bytes.
 `dbvault delete --target KEY --confirm` unregisters and deletes a backup;
 `--dry-run` previews deletion without requiring confirmation.
+In a terminal, `export`, `inspect`, `verify` and `delete` show the same
+filterable backup picker as restore when `--target` is omitted. JSON, quiet,
+non-terminal and `--non-interactive` invocations never prompt and still require
+`--target`. A backup picked for `delete` shows its details and a permanent
+deletion warning, then needs a yes/no confirmation (default no) unless
+`--confirm` or `--dry-run` was given.
 
 ---
 
@@ -466,7 +472,10 @@ flat storage keys or paths resolving directly within the configured local root.
 Restore dry-run does not require `--confirm`; it still makes a private verified
 temporary snapshot and contacts the target database. Starting with v0.5.0, restore
 offers inline selection/confirmation when `--target` is omitted in a terminal or
-`--interactive` is supplied. JSON, quiet and non-terminal input never prompt.
+`--interactive` is supplied. The picker lists aligned backup columns and filters
+with `/`. Interactive restores into an existing destination require typing the
+destination database name (SQLite: file name); `--confirm` skips that prompt.
+JSON, quiet and non-terminal input never prompt.
 `--timeout 0` disables the deadline. See [new restore workflows](restore-workflows.md)
 for `dbvault history`, `dbvault export` and per-engine creation limits.
 

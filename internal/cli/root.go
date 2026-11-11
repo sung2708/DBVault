@@ -165,6 +165,7 @@ func (o *options) command(name string) *cobra.Command {
 		f.Duration("timeout", 4*time.Hour, "Operation limit; 0 disables timeout")
 	case "export":
 		f.StringP("target", "t", "", targetHelp)
+		f.Bool("non-interactive", false, "Never prompt; require --target")
 		f.String("file", "", "New output file path; existing files are refused")
 		f.Bool("decompress", false, "Export native dump/image without outer gzip/zstd compression")
 		f.Duration("timeout", 2*time.Hour, "Operation limit; 0 disables timeout")
@@ -172,6 +173,7 @@ func (o *options) command(name string) *cobra.Command {
 		f.IntP("limit", "n", 50, "Maximum restore records to display")
 	case "verify", "inspect", "delete":
 		f.StringP("target", "t", "", targetHelp)
+		f.Bool("non-interactive", false, "Never prompt; require --target")
 		if name == "delete" {
 			f.Bool("confirm", false, "Authorize deletion")
 			f.Bool("dry-run", false, "Validate selection without deleting")
@@ -190,11 +192,31 @@ func (o *options) command(name string) *cobra.Command {
 	c.RunE = func(c *cobra.Command, _ []string) error { err := o.run(c, name); return o.redactor.Error(err) }
 	return c
 }
-func (o *options) run(c *cobra.Command, name string) error {
-	if name == "restore" {
-		if err := o.selectRestore(c); err != nil {
-			return err
+func operationContext(c *cobra.Command) (context.Context, context.CancelFunc, error) {
+	if c.Flags().Lookup("timeout") != nil {
+		duration, _ := c.Flags().GetDuration("timeout")
+		if duration < 0 {
+			return nil, nil, fmt.Errorf("--timeout must be nonnegative")
 		}
+		if duration > 0 {
+			ctx, cancel := context.WithTimeout(c.Context(), duration)
+			return ctx, cancel, nil
+		}
+	}
+	return c.Context(), func() {}, nil
+}
+
+func (o *options) run(c *cobra.Command, name string) error {
+	var selectedConfig *config.Config
+	var err error
+	switch name {
+	case "restore":
+		selectedConfig, err = o.selectRestore(c)
+	case "export", "verify", "inspect", "delete":
+		selectedConfig, err = o.selectTarget(c, name)
+	}
+	if err != nil {
+		return err
 	}
 	target, _ := c.Flags().GetString("target")
 	confirm, _ := c.Flags().GetBool("confirm")
@@ -212,25 +234,23 @@ func (o *options) run(c *cobra.Command, name string) error {
 	if (name == "list" || name == "history") && limit < 1 {
 		return fmt.Errorf("--limit must be positive")
 	}
-	ctx := c.Context()
-	if c.Flags().Lookup("timeout") != nil {
-		duration, _ := c.Flags().GetDuration("timeout")
-		if duration < 0 {
-			return fmt.Errorf("--timeout must be nonnegative")
-		}
-		if duration > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, duration)
-			defer cancel()
-		}
+	ctx, cancel, err := operationContext(c)
+	if err != nil {
+		return err
 	}
+	defer cancel()
 	display := o.display(c)
 	stopDisplay := display.Start(ctx)
 	defer stopDisplay()
 	details := presentation.Details{Operation: name, Target: target, ConfigPath: o.configPath, DryRun: dry, Started: time.Now()}
 	display.Configure(details, o.redactor)
 	display.Step("configuration")
-	cfg, err := o.load(c)
+	var cfg config.Config
+	if selectedConfig == nil {
+		cfg, err = o.load(c)
+	} else {
+		cfg = *selectedConfig
+	}
 	if err == nil && name == "restore" {
 		newDB, _ := c.Flags().GetBool("new-database")
 		if newDB && !c.Flags().Changed("database") {
@@ -344,7 +364,7 @@ func (o *options) run(c *cobra.Command, name string) error {
 		if err != nil {
 			return err
 		}
-		display.RestorePreview(m, cfg.Database, newDB, backupBefore, clean, tables, schemas, collections)
+		display.RestorePreview(presentation.RestorePlan{Manifest: m, Destination: cfg.Database, NewDatabase: newDB, BackupBefore: backupBefore, Clean: clean, Tables: tables, Schemas: schemas, Collections: collections})
 		result, restoreErr := svc.RestoreWithResult(ctx, key, confirm, dry, app.RestoreRequest{NewDatabase: newDB, BackupBefore: backupBefore, Options: database.RestoreOptions{Clean: clean, Tables: tables, Schemas: schemas, Collections: collections}})
 		if result.Backup.ID != "" {
 			return errors.Join(restoreErr, o.output(c, result))

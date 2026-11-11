@@ -9,59 +9,42 @@ import (
 	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/onboarding"
 	"github.com/sung2708/DBVault/internal/presentation"
-	"github.com/sung2708/DBVault/internal/storage/providers"
+	"path/filepath"
 	"time"
 )
 
-func (o *options) selectRestore(c *cobra.Command) error {
+func (o *options) selectRestore(c *cobra.Command) (*config.Config, error) {
 	target, _ := c.Flags().GetString("target")
 	interactive, _ := c.Flags().GetBool("interactive")
 	nonInteractive, _ := c.Flags().GetBool("non-interactive")
 	allowed := presentation.CanPrompt(c.InOrStdin(), c.ErrOrStderr(), nonInteractive, jsonMode(c), globalBool(c, "quiet"))
 	if interactive && !allowed {
-		return fmt.Errorf("--interactive requires terminal input/output and text mode; provide --target and destination flags instead")
+		return nil, fmt.Errorf("--interactive requires terminal input/output and text mode; provide --target and destination flags instead")
 	}
 	if !interactive && (target != "" || !allowed) {
-		return nil
+		return nil, nil
 	}
-	cfg, err := o.load(c)
+	cfg, items, err := o.listForPicker(c)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
-	store, closeStore, err := providers.Open(ctx, cfg.Storage)
-	if err != nil {
-		cancel()
-		return err
+	if err := o.promptRestore(c, o.terminalPrompter(c), cfg, items); err != nil {
+		return nil, err
 	}
-	svc := &app.Service{Config: cfg, Store: store}
-	items, err := svc.List(ctx, "")
-	closeErr := closeStore()
-	cancel()
-	if err != nil {
-		return err
+	if c.Flags().Changed("database") {
+		cfg.Database.Database, _ = c.Flags().GetString("database")
+		if err := cfg.Validate(); err != nil {
+			return nil, err
+		}
 	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return o.promptRestore(c, &presentation.TerminalPrompter{In: c.InOrStdin(), Out: c.ErrOrStderr(), NoColor: o.noColor, Redactor: o.redactor}, cfg, items)
+	return &cfg, nil
 }
 
 func (o *options) promptRestore(c *cobra.Command, p onboarding.Prompter, cfg config.Config, items []metadata.Manifest) error {
 	target, _ := c.Flags().GetString("target")
 	if target == "" {
-		if len(items) == 0 {
-			return fmt.Errorf("no completed backups found in configured storage")
-		}
-		choices := make([]onboarding.Choice, 0, len(items))
-		for _, m := range items {
-			choices = append(choices, onboarding.Choice{Label: fmt.Sprintf("%s | %s / %s | %s | %s", m.CreatedAt.UTC().Format("2006-01-02 15:04:05 UTC"), m.Database.Engine, m.Database.Name, presentation.FormatBytes(m.Pipeline.Stored), m.Name), Value: m.Name})
-		}
-		selected, err := p.Select(c.Context(), "Choose backup", choices, items[0].Name)
+		selected, err := pickBackup(c, p, items)
 		if err != nil {
-			return err
-		}
-		if err = c.Flags().Set("target", selected); err != nil {
 			return err
 		}
 		target = selected
@@ -140,22 +123,41 @@ func (o *options) promptRestore(c *cobra.Command, p onboarding.Prompter, cfg con
 	tables, _ := c.Flags().GetStringSlice("table")
 	schemas, _ := c.Flags().GetStringSlice("schema")
 	collections, _ := c.Flags().GetStringSlice("collection")
+	plan := presentation.RestorePlan{Manifest: metadata.Manifest{Name: target}, Destination: cfg.Database, NewDatabase: newDB, BackupBefore: safety, Clean: clean, Tables: tables, Schemas: schemas, Collections: collections}
+	plan.Destination.Database = name
 	for _, m := range items {
 		if m.Name == target {
-			p.Message(fmt.Sprintf("Source database: %s\nBackup created: %s\nStored size: %s", m.Database.Name, presentation.FormatTime(m.CreatedAt), presentation.FormatBytes(m.Pipeline.Stored)))
+			plan.Manifest = m
 			break
 		}
 	}
-	destination := fmt.Sprintf("%s / %s:%d / %s", cfg.Database.Type, cfg.Database.Host, cfg.Database.Port, name)
-	if cfg.Database.Type == "sqlite" {
-		destination = "SQLite / " + name
+	p.Message("Restore plan\n" + presentation.FormatFields(plan.Fields(), presentation.Detect(c.ErrOrStderr()).Width))
+	for _, w := range plan.Warnings() {
+		if warner, ok := p.(onboarding.Warner); ok {
+			warner.Warning(w)
+		} else {
+			p.Message("Warning: " + w)
+		}
 	}
-	p.Message(fmt.Sprintf("Backup: %s\nDestination: %s\nCreate new: %t | Clean/drop restored objects: %t | Backup before restore: %t\nTables: %v | Schemas: %v | Collections: %v", target, destination, newDB, clean, safety, tables, schemas, collections))
 	confirmed, _ := c.Flags().GetBool("confirm")
 	if confirmed {
 		return nil
 	}
-	yes, err := p.Confirm(c.Context(), "Restore into this destination? Stop application writes first.", false)
+	if !newDB {
+		// Writing into an existing destination needs the operator to name it;
+		// --confirm remains the non-interactive authorization.
+		want := destinationConfirmation(cfg.Database.Type, name)
+		typed, err := p.Input(c.Context(), fmt.Sprintf("Type %q to restore into this existing destination. Stop application writes first.", want), "")
+		if err != nil {
+			return err
+		}
+		if typed != want {
+			p.Message("Confirmation did not match; nothing was restored.")
+			return context.Canceled
+		}
+		return c.Flags().Set("confirm", "true")
+	}
+	yes, err := p.Confirm(c.Context(), "Restore into this new destination?", false)
 	if err != nil {
 		return err
 	}
@@ -163,4 +165,13 @@ func (o *options) promptRestore(c *cobra.Command, p onboarding.Prompter, cfg con
 		return context.Canceled
 	}
 	return c.Flags().Set("confirm", "true")
+}
+
+// destinationConfirmation is the text an operator types to authorize a restore
+// into an existing destination: the database name, or the SQLite file name.
+func destinationConfirmation(engine, name string) string {
+	if engine == "sqlite" {
+		return filepath.Base(name)
+	}
+	return name
 }

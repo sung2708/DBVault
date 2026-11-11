@@ -73,6 +73,13 @@ func applyCommandHelp(c *cobra.Command) {
 		c.Example += "\n  dbvault restore --interactive\n  dbvault restore --target backup.dump.gz --new-database --dry-run\n  dbvault restore --target backup.dump.gz --new-database --confirm\n  dbvault restore --target backup.dump.gz --backup-before-restore --confirm"
 	}
 	switch c.Name() {
+	case "export", "verify", "inspect", "delete":
+		c.Long += "\n\nIn a terminal, omit --target to choose a backup from a filterable list.\nJSON, quiet, non-terminal and --non-interactive invocations never prompt."
+	}
+	if c.Name() == "delete" {
+		c.Long += "\nA backup chosen this way still needs a yes/no confirmation unless --confirm\nor --dry-run is given."
+	}
+	switch c.Name() {
 	case "restore", "export", "verify", "inspect", "delete":
 		c.Use += " --target <backup-name>"
 	}

@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Interactive restore lists backups in aligned columns (created, source, type,
+  encryption, stored size, name) that fit the terminal width, shows at most ten
+  rows and filters with `/`, including full backup names shortened on screen.
+  Backup selection reports when storage is loading and keeps the selected
+  storage configuration through execution.
+- The interactive restore plan uses labeled fields, omits empty selectors and
+  highlights `--clean` as a warning.
+- Interactive restores into an existing destination require typing the
+  destination database name (SQLite: file name) instead of answering yes/no.
+  `--confirm` still authorizes restores without a prompt.
+- `export`, `inspect`, `verify` and `delete` offer the same backup picker when
+  `--target` is omitted in a terminal, and accept `--non-interactive`. A picked
+  deletion still requires a yes/no confirmation unless `--confirm` or
+  `--dry-run` is given.
+- Progress lines show smoothed throughput, and an ETA when the total is known,
+  for stages running at least two seconds, and use `█░` bars on Unicode
+  terminals.
+- Replace the archived `gopkg.in/yaml.v3` with its maintained drop-in fork
+  `go.yaml.in/yaml/v3`. Written configuration files are byte-identical.
+- Update AWS, Google Cloud, Azure, MongoDB driver, SQLite and other direct
+  dependencies to their latest patch and minor releases.
+- Correct stale documentation: the capability matrix now lists logical
+  incremental chains and native `pitr` increments, and the roadmap and README
+  describe the current release state.
+- Run `govulncheck` in CI, update CI and release workflows to current GitHub
+  Actions majors, and enable weekly Dependabot updates for Go modules,
+  GitHub Actions and Docker base images.
+
+### Security
+- Update dependencies with known vulnerabilities reachable from DBVault:
+  `klauspost/compress` 1.20.4, `golang.org/x/net` 0.62.0, `google.golang.org/grpc`
+  1.85.0 and `go.opentelemetry.io/otel/sdk` 1.47.0.
+- Build with the Go 1.26.11 toolchain instead of Go 1.26.0, picking up
+  standard-library security fixes (`crypto/tls`, `crypto/x509`, `net/http`,
+  `os`). The minimum `go` version stays 1.26.0.
+
 ## [v0.8.0] - 2026-11-09
 
 ### Changed

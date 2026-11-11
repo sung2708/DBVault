@@ -24,7 +24,7 @@ import (
 	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/pitr"
 	"github.com/sung2708/DBVault/internal/security"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Build a Linux binary before running this Docker-only fixture and point

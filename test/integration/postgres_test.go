@@ -22,7 +22,7 @@ import (
 	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/security"
 	"github.com/sung2708/DBVault/internal/storage/local"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // containerRunner uses vendor tools inside an isolated container. Secret

@@ -11,7 +11,17 @@ dependencies. Questions support arrows/Enter, Esc and Ctrl+C, with masked secret
 input for temporary connection tests. No alternate-screen dashboard or mouse UI
 is used. `TERM=dumb` falls back to numbered choices, yes/no and plain input.
 Prompt/review messages go to stderr; final results go to stdout. Existing commands
-keep their flags and destructive-operation guards; no restore selection is added.
+keep their flags and destructive-operation guards. Interactive restore selection
+uses the same prompter: a bounded, `/`-filterable backup list with aligned
+columns that fit the terminal width, a labeled restore plan with a highlighted
+`--clean` warning, and typed destination-name confirmation for existing
+destinations (see [restore workflows](restore-workflows.md#terminal-selection-and-output)).
+Without color the warning keeps a `[WARN]` marker. `export`, `inspect`,
+`verify` and `delete` reuse the backup picker when `--target` is omitted, under
+the same prompt policy; a picked deletion still asks for confirmation.
+Paste a full backup name after `/` even if the row shortens it. While storage
+loads the list, Ctrl+C cancels. When a command supports `--timeout`, that
+limit applies separately to listing and to the operation after selection.
 
 Both stdin and stderr must be terminals to prompt. Complete required flags,
 `--non-interactive`, JSON and quiet mode bypass prompts. `--no-color` and
@@ -32,7 +42,12 @@ keeps results/errors, omits hints/progress and prints only the name after a back
 
 Unknown-size backup streams use a spinner with actual consumed bytes, never a
 percentage. Verify/snapshot progress uses the registered stored-byte total;
-restore progress uses the registered raw-byte total. These measure bytes consumed
+restore progress uses the registered raw-byte total. With a known total the line
+adds a percentage and, on terminals at least 72 columns wide, a ten-cell bar
+(`█░` on Unicode terminals, `[#-]` otherwise). Stages running at least two
+seconds also show smoothed throughput, plus an ETA when the total is known.
+The line stays within the terminal width by dropping the bar, then the ETA,
+then throughput. These measure bytes consumed
 by the pipeline, not rows committed or network acknowledgments. Stage completion
 appears only after the relevant operation returns successfully. Short stages do
 not animate; cancellation stops and clears the one owned transient stderr line.

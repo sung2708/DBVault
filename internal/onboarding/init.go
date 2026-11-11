@@ -24,6 +24,18 @@ type Prompter interface {
 	Confirm(context.Context, string, bool) (bool, error)
 	Message(string)
 }
+
+// ListSelector is optionally implemented by prompters that can show a long,
+// filterable list with a column header and a bounded visible height.
+type ListSelector interface {
+	SelectList(ctx context.Context, title, header string, choices []Choice, value string, height int) (string, error)
+}
+
+// Warner is optionally implemented by prompters that can highlight a warning.
+type Warner interface {
+	Warning(string)
+}
+
 type Options struct {
 	Values                                  map[string]string // only explicitly supplied flags
 	Path                                    string

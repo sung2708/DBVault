@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Marshal serializes the runtime schema, omitting empty optional fields.

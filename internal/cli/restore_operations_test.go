@@ -101,13 +101,18 @@ func TestSQLiteRestoreNewSafetyHistoryExport(t *testing.T) {
 
 type restorePrompt struct {
 	cancel   bool
+	typed    string
+	inputs   []string
 	messages []string
 }
 
 func (p *restorePrompt) Select(_ context.Context, _ string, c []onboarding.Choice, _ string) (string, error) {
 	return c[0].Value, nil
 }
-func (*restorePrompt) Input(context.Context, string, string) (string, error) { return "", nil }
+func (p *restorePrompt) Input(_ context.Context, title, _ string) (string, error) {
+	p.inputs = append(p.inputs, title)
+	return p.typed, nil
+}
 func (*restorePrompt) Secret(context.Context, string) (string, error)        { return "", nil }
 func (p *restorePrompt) Confirm(context.Context, string, bool) (bool, error) { return !p.cancel, nil }
 func (p *restorePrompt) Message(s string)                                    { p.messages = append(p.messages, s) }
@@ -150,7 +155,7 @@ func TestInteractiveSafetyFlagSelectsExistingDestination(t *testing.T) {
 	}
 	c.SetContext(context.Background())
 	c.Flags().Set("backup-before-restore", "true")
-	p := &restorePrompt{}
+	p := &restorePrompt{typed: "app"}
 	o := &options{}
 	if e = o.promptRestore(c, p, config.Config{Database: config.Database{Type: "postgres", Database: "app"}}, []metadata.Manifest{{Name: "fixture.dump"}}); e != nil {
 		t.Fatal(e)
