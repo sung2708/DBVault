@@ -40,7 +40,7 @@ validation remain future milestones. See
 - [x] Interactive restore: aligned, filterable backup picker, labeled restore
   plan with `--clean` warning, typed destination-name confirmation for existing
   destinations, and progress throughput/ETA.
-- [ ] Reuse the backup picker for `delete`, `export`, `inspect` and `verify`.
+- [x] Reuse the backup picker for `delete`, `export`, `inspect` and `verify`.
 - [ ] Charm v2 (Huh/Lip Gloss) migration (planned for v0.10).
 
 ### Available in Phase 0:

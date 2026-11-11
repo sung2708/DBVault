@@ -98,7 +98,7 @@ func (p *TerminalPrompter) SelectList(ctx context.Context, title, header string,
 	if os.Getenv("TERM") == "dumb" {
 		return p.numberedSelect(ctx, title, header, choices, value)
 	}
-	field := huh.NewSelect[string]().Title(title).Options(p.options(choices)...).Value(&value)
+	field := huh.NewSelect[string]().Title(title + " (/ to filter)").Options(p.options(choices)...).Value(&value)
 	if header != "" {
 		// The description sits between the title and the options, two
 		// columns in, so it lines up with labels after the "> " selector.

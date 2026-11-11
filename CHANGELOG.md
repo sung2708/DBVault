@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interactive restores into an existing destination require typing the
   destination database name (SQLite: file name) instead of answering yes/no.
   `--confirm` still authorizes restores without a prompt.
+- `export`, `inspect`, `verify` and `delete` offer the same backup picker when
+  `--target` is omitted in a terminal, and accept `--non-interactive`. A picked
+  deletion still requires a yes/no confirmation unless `--confirm` or
+  `--dry-run` is given.
 - Progress lines show smoothed throughput, and an ETA when the total is known,
   for stages running at least two seconds, and use `█░` bars on Unicode
   terminals.

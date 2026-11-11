@@ -26,19 +26,7 @@ func (p RestorePlan) Fields() [][2]string {
 			fields = append(fields, [2]string{label, value})
 		}
 	}
-	m := p.Manifest
-	add("Backup", m.Name)
-	if !m.CreatedAt.IsZero() {
-		add("Created", FormatTime(m.CreatedAt))
-	}
-	source := m.Database.Name
-	if m.Database.Engine != "" {
-		source = strings.TrimSuffix(Engine(m.Database.Engine)+" / "+m.Database.Name, " / ")
-	}
-	add("Source", source)
-	if m.Pipeline.Stored > 0 {
-		add("Stored size", FormatBytes(m.Pipeline.Stored))
-	}
+	fields = p.SourceFields()
 	add("Destination", p.Destination.Database)
 	if p.Destination.Type != "sqlite" && p.Destination.Host != "" {
 		add("Server", fmt.Sprintf("%s:%d", p.Destination.Host, p.Destination.Port))
@@ -59,6 +47,29 @@ func (p RestorePlan) Fields() [][2]string {
 	add("Tables", strings.Join(p.Tables, ", "))
 	add("Schemas", strings.Join(p.Schemas, ", "))
 	add("Collections", strings.Join(p.Collections, ", "))
+	return fields
+}
+
+// SourceFields describes the selected backup itself.
+func (p RestorePlan) SourceFields() [][2]string {
+	m := p.Manifest
+	fields := [][2]string{{"Backup", m.Name}}
+	if !m.CreatedAt.IsZero() {
+		fields = append(fields, [2]string{"Created", FormatTime(m.CreatedAt)})
+	}
+	if m.BackupType != "" {
+		fields = append(fields, [2]string{"Type", m.BackupType})
+	}
+	source := m.Database.Name
+	if m.Database.Engine != "" {
+		source = strings.TrimSuffix(Engine(m.Database.Engine)+" / "+m.Database.Name, " / ")
+	}
+	if source != "" {
+		fields = append(fields, [2]string{"Source", source})
+	}
+	if m.Pipeline.Stored > 0 {
+		fields = append(fields, [2]string{"Stored size", FormatBytes(m.Pipeline.Stored)})
+	}
 	return fields
 }
 

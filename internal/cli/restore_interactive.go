@@ -9,7 +9,6 @@ import (
 	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/onboarding"
 	"github.com/sung2708/DBVault/internal/presentation"
-	"github.com/sung2708/DBVault/internal/storage/providers"
 	"path/filepath"
 	"time"
 )
@@ -25,52 +24,18 @@ func (o *options) selectRestore(c *cobra.Command) error {
 	if !interactive && (target != "" || !allowed) {
 		return nil
 	}
-	cfg, err := o.load(c)
+	cfg, items, err := o.listForPicker(c)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
-	store, closeStore, err := providers.Open(ctx, cfg.Storage)
-	if err != nil {
-		cancel()
-		return err
-	}
-	svc := &app.Service{Config: cfg, Store: store}
-	items, err := svc.List(ctx, "")
-	closeErr := closeStore()
-	cancel()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return o.promptRestore(c, &presentation.TerminalPrompter{In: c.InOrStdin(), Out: c.ErrOrStderr(), NoColor: o.noColor, Redactor: o.redactor}, cfg, items)
+	return o.promptRestore(c, o.terminalPrompter(c), cfg, items)
 }
 
 func (o *options) promptRestore(c *cobra.Command, p onboarding.Prompter, cfg config.Config, items []metadata.Manifest) error {
 	target, _ := c.Flags().GetString("target")
 	if target == "" {
-		if len(items) == 0 {
-			return fmt.Errorf("no completed backups found in configured storage")
-		}
-		caps := presentation.Detect(c.ErrOrStderr())
-		picker := presentation.BackupChoices(items, caps.Width, caps.Unicode)
-		title := "Choose backup"
-		if picker.Source != "" {
-			title += " of " + picker.Source
-		}
-		var selected string
-		var err error
-		if list, ok := p.(onboarding.ListSelector); ok {
-			selected, err = list.SelectList(c.Context(), title+" (/ to filter)", picker.Header, picker.Choices, items[0].Name, min(len(picker.Choices), pickerRows)+pickerChrome)
-		} else {
-			selected, err = p.Select(c.Context(), title, picker.Choices, items[0].Name)
-		}
+		selected, err := pickBackup(c, p, items)
 		if err != nil {
-			return err
-		}
-		if err = c.Flags().Set("target", selected); err != nil {
 			return err
 		}
 		target = selected
@@ -192,13 +157,6 @@ func (o *options) promptRestore(c *cobra.Command, p onboarding.Prompter, cfg con
 	}
 	return c.Flags().Set("confirm", "true")
 }
-
-const (
-	// pickerRows bounds visible backups; pickerChrome covers the title,
-	// filter and column header lines drawn above them.
-	pickerRows   = 10
-	pickerChrome = 3
-)
 
 // destinationConfirmation is the text an operator types to authorize a restore
 // into an existing destination: the database name, or the SQLite file name.

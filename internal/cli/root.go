@@ -165,6 +165,7 @@ func (o *options) command(name string) *cobra.Command {
 		f.Duration("timeout", 4*time.Hour, "Operation limit; 0 disables timeout")
 	case "export":
 		f.StringP("target", "t", "", targetHelp)
+		f.Bool("non-interactive", false, "Never prompt; require --target")
 		f.String("file", "", "New output file path; existing files are refused")
 		f.Bool("decompress", false, "Export native dump/image without outer gzip/zstd compression")
 		f.Duration("timeout", 2*time.Hour, "Operation limit; 0 disables timeout")
@@ -172,6 +173,7 @@ func (o *options) command(name string) *cobra.Command {
 		f.IntP("limit", "n", 50, "Maximum restore records to display")
 	case "verify", "inspect", "delete":
 		f.StringP("target", "t", "", targetHelp)
+		f.Bool("non-interactive", false, "Never prompt; require --target")
 		if name == "delete" {
 			f.Bool("confirm", false, "Authorize deletion")
 			f.Bool("dry-run", false, "Validate selection without deleting")
@@ -191,8 +193,13 @@ func (o *options) command(name string) *cobra.Command {
 	return c
 }
 func (o *options) run(c *cobra.Command, name string) error {
-	if name == "restore" {
+	switch name {
+	case "restore":
 		if err := o.selectRestore(c); err != nil {
+			return err
+		}
+	case "export", "verify", "inspect", "delete":
+		if err := o.selectTarget(c, name); err != nil {
 			return err
 		}
 	}

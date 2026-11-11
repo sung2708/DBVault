@@ -16,7 +16,9 @@ uses the same prompter: a bounded, `/`-filterable backup list with aligned
 columns that fit the terminal width, a labeled restore plan with a highlighted
 `--clean` warning, and typed destination-name confirmation for existing
 destinations (see [restore workflows](restore-workflows.md#terminal-selection-and-output)).
-Without color the warning keeps a `[WARN]` marker.
+Without color the warning keeps a `[WARN]` marker. `export`, `inspect`,
+`verify` and `delete` reuse the backup picker when `--target` is omitted, under
+the same prompt policy; a picked deletion still asks for confirmation.
 
 Both stdin and stderr must be terminals to prompt. Complete required flags,
 `--non-interactive`, JSON and quiet mode bypass prompts. `--no-color` and
