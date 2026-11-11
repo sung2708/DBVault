@@ -1,7 +1,8 @@
 # Installation Guide
 
-Version `v0.8.0` reduces temporary disk use for unencrypted logical restores
-and improves recovery from interrupted backup publication and deletion.
+The latest published version, `v0.8.0`, reduces temporary disk use for
+unencrypted logical restores and improves recovery from interrupted backup
+publication and deletion.
 Install this version explicitly:
 
 ```bash
@@ -16,8 +17,9 @@ Python 3 and is shipped in the source tree under `scripts/monitor-backups.py`.
 
 This document describes how to install DBVault, configure native database dependencies across supported operating systems, and verify your environment.
 
-Go 1.26+ is required to build the current implementation. Published releases
-include binary archives; the tag-triggered workflow builds
+The current source requires Go 1.26.0 or later and specifies Go 1.26.11 as its
+preferred toolchain. CI uses that toolchain for the upcoming `v0.9.0`.
+Published releases include binary archives. The tag-triggered workflow builds
 Linux amd64/arm64, macOS amd64/arm64 and Windows amd64, injecting the real tag,
 commit and UTC build time into `dbvault version`. It publishes archives only when
 maintainers push a release tag. Native database tools are not included in those

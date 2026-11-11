@@ -30,9 +30,11 @@ instructions; it never downloads or installs a binary.
 `dbvault delete --target KEY --confirm` unregisters and deletes a backup;
 `--dry-run` previews deletion without requiring confirmation.
 In a terminal, `export`, `inspect`, `verify` and `delete` show the same
-filterable backup picker as restore when `--target` is omitted. JSON, quiet,
-non-terminal and `--non-interactive` invocations never prompt and still require
-`--target`. A backup picked for `delete` shows its details and a permanent
+filterable backup picker as restore when `--target` is omitted. Press `/` to
+search by full backup name. Ctrl+C cancels while storage loads. For `export`
+and `restore`, `--timeout` applies separately to listing and execution.
+JSON, quiet, non-terminal and `--non-interactive` invocations never prompt
+and still require `--target`. A backup picked for `delete` shows its details and a permanent
 deletion warning, then needs a yes/no confirmation (default no) unless
 `--confirm` or `--dry-run` was given.
 

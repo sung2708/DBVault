@@ -1,8 +1,9 @@
 # Restore destinations, history and export
 
-These features are available starting with v0.5.0. Install with
-`go install github.com/sung2708/DBVault/cmd/dbvault@v0.5.0` or download the matching
-binary from [GitHub Releases](https://github.com/sung2708/DBVault/releases/tag/v0.5.0).
+Restore destinations, history and verified exports were introduced in
+`v0.5.0`. The expanded picker and typed confirmation below describe the
+upcoming `v0.9.0`. See the [installation guide](installation.md) for the
+latest published version.
 
 ## Restore into a new database or file
 
@@ -86,7 +87,9 @@ name. When every backup comes from the same database, that source moves into the
 title. At most ten rows are visible at once; press `/` to filter by typed text.
 Narrow terminals give up the source, encryption, type and size columns in that
 order and shorten long names in the middle; the name itself is always shown.
-Use arrows or j/k, Enter to select, Esc/Ctrl+C to cancel.
+Paste a full backup name after `/` even when its row is shortened.
+Use arrows or j/k, Enter to select, Esc/Ctrl+C to cancel. The command uses
+the configuration it loaded for selection through execution.
 
 New destination is the default; choosing an existing destination offers a safety
 backup. A labeled restore plan then shows the backup, source, destination, mode,

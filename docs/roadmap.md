@@ -31,7 +31,7 @@ validation remain future milestones. See
 - [x] MySQL/MongoDB recovery drills in new isolated Docker servers with fresh
   credentials, structural validation and real integration coverage.
 
-### v0.9.0 (in preparation)
+### v0.9.0 (implemented, publication pending)
 
 - [x] Go 1.26.11 toolchain for standard-library security fixes, `govulncheck`
   in CI and Dependabot for Go modules, GitHub Actions and Docker images.
@@ -41,7 +41,12 @@ validation remain future milestones. See
   plan with `--clean` warning, typed destination-name confirmation for existing
   destinations, and progress throughput/ETA.
 - [x] Reuse the backup picker for `delete`, `export`, `inspect` and `verify`.
-- [ ] Charm v2 (Huh/Lip Gloss) migration (planned for v0.10).
+- [x] Match full names in the picker and keep the selected storage configuration
+  through execution.
+
+### v0.10
+
+- [ ] Charm v2 (Huh/Lip Gloss) migration.
 
 ### Available in Phase 0:
 - [x] Comprehensive architectural blueprint and pipeline design.

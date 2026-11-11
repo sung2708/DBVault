@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned for `v0.9.0`.
+
 ### Changed
 - Interactive restore lists backups in aligned columns (created, source, type,
   encryption, stored size, name) that fit the terminal width, shows at most ten
@@ -30,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replace the archived `gopkg.in/yaml.v3` with its maintained drop-in fork
   `go.yaml.in/yaml/v3`. Written configuration files are byte-identical.
 - Update AWS, Google Cloud, Azure, MongoDB driver, SQLite and other direct
-  dependencies to their latest patch and minor releases.
+  dependencies with patch and minor upgrades.
 - Correct stale documentation: the capability matrix now lists logical
   incremental chains and native `pitr` increments, and the roadmap and README
   describe the current release state.
