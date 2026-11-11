@@ -209,7 +209,11 @@ lists those packages as affected in Trixie. See the
 MongoDB's retained Database Tools also embed older x/net and x/crypto
 modules. Removing `bsondump` alone does not update `mongodump` or
 `mongorestore`. Existing backups require matching tools versions.
-Scan each final image digest to assess the packages actually shipped.
+The updated MongoDB image returned one High, 20 Medium, three Low and one
+Unspecified advisory on both amd64 and arm64. The High is
+[CVE-2026-78661](https://pkg.go.dev/vuln/GO-2026-6860) in the upstream
+Tools x/net dependency. Scan each final image digest to assess the packages
+actually shipped.
 
 #### Versioned registry images (`v0.4.0` and later)
 
