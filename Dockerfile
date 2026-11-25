@@ -41,7 +41,7 @@ USER mysql
 WORKDIR /var/lib/mysql
 ENTRYPOINT ["dbvault"]
 
-FROM golang:1.26-alpine3.24 AS mongodb-tools
+FROM golang:1.27-alpine3.24 AS mongodb-tools
 RUN apk add --no-cache build-base krb5-dev curl
 WORKDIR /tools
 # Preserve the archive format/tool version used by existing backups.
