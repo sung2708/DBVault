@@ -56,12 +56,10 @@ recovery drills and [independent monitoring](docs/independent-monitoring.md).
 The AWS live verification fixture is available, and live S3/KMS/Object Lock
 verification is pending. See the [verification procedure](docs/testing.md#release-verification-on-aws).
 
-The latest published release, `v0.9.2`, packages PostgreSQL 16 clients and
-MongoDB Database Tools 100.20.0. Install it with
-`go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.2`.
-The current source adds PostgreSQL 17 and 18 images and MongoDB Database
-Tools 100.20.1 for a future tagged release. See the
-[container build details](docs/installation.md#container-security-updates).
+DBVault `v0.10.0` adds PostgreSQL 17 and 18 images and MongoDB Database
+Tools 100.20.1. Install the tagged version with
+`go install github.com/sung2708/DBVault/cmd/dbvault@v0.10.0`.
+See the [container build details](docs/installation.md#container-security-updates).
 
 See the [changelog](CHANGELOG.md).
 
@@ -634,10 +632,9 @@ docker pull sungp2708/dbvault:postgres
 docker run --rm sungp2708/dbvault:postgres --help
 ```
 
-The published `v0.9.2` images use the `postgres`, `mysql`, `mongodb`, and
-`sqlite` aliases. Its PostgreSQL image targets server major 16.
-The next tagged build will also publish `postgres16`, `postgres17` and
-`postgres18`, with `postgres` continuing to point to 16. To build and
+Docker Hub provides `postgres16`, `postgres17`, `postgres18`, `mysql`,
+`mongodb`, and `sqlite` starting with `v0.10.0`. The `postgres` alias still
+points to PostgreSQL 16. Match the client major to the server major. To build and
 publish an image manually from this repository, log in to Docker Hub and run:
 
 ```bash

@@ -1,9 +1,9 @@
 # Installation Guide
 
-Version `v0.9.2` packages updated database clients and runtime libraries. Install this version explicitly:
+Install DBVault `v0.10.0` explicitly:
 
 ```bash
-go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.2
+go install github.com/sung2708/DBVault/cmd/dbvault@v0.10.0
 ```
 
 Binary/container assets become available after the release workflow succeeds.
@@ -20,8 +20,8 @@ Published releases include binary archives. The tag-triggered workflow builds
 Linux amd64/arm64, macOS amd64/arm64 and Windows amd64, injecting the real tag,
 commit and UTC build time into `dbvault version`. It publishes archives only when
 maintainers push a release tag. Native database tools are not included in those
-archives. The published `v0.9.2` Docker targets provide PostgreSQL 16 clients,
-MySQL 8.4 clients, MongoDB Database Tools 100.20.0, or embedded SQLite. Choose the target for your engine.
+archives. The `v0.10.0` Docker targets provide PostgreSQL 16, 17, or 18
+clients, MySQL 8.4 clients, MongoDB Database Tools 100.20.1, or embedded SQLite. Choose the target for your engine.
 The MySQL image ships `mysql`, `mysqldump` and `mysqlbinlog` for DBVault's
 workflows. As of `v0.9.1`, it omits MySQL Shell (`mysqlsh`). The MongoDB image
 uses `mongodump` and `mongorestore` for backup and restore.
@@ -158,7 +158,7 @@ source ~/.zshrc
 ### 3.3 MongoDB Tools (`mongodump`, `mongorestore`)
 
 Install the same Database Tools 100.x version for the local `mongodump` and
-`mongorestore` binaries. On the current development branch, restoring an existing
+`mongorestore` binaries. Starting with DBVault `v0.10.0`, restoring an existing
 archive allows the same or a newer patch in the archive's 100.MINOR series.
 The published `v0.9.2` requires an exact tools version match.
 
@@ -227,12 +227,10 @@ the edge branch's r6 threshold. Alpine's security tracker confirms that
 the 3.24 branch is fixed in 1.2.6-r3. CI checks this branch's minimum
 version. See the [Alpine advisory](https://security.alpinelinux.org/vuln/CVE-2026-107891).
 Scan each final image digest because advisory data changes over time.
-PostgreSQL 17/18 images and the MongoDB 100.20.1 rebuild are unreleased.
+PostgreSQL 17/18 images and the MongoDB 100.20.1 rebuild start with `v0.10.0`.
 See the changelog for the client updates shipped in `v0.9.2`.
 
-Docker Hub retains the four engine aliases and the v0.9.2 and v0.9.1
-versioned images. If your deployment pins an older Docker Hub tag, update it
-to a retained version before pulling. See the [Docker Hub tags](https://hub.docker.com/r/sungp2708/dbvault/tags)
+Docker Hub provides moving aliases and versioned tags. Check the [Docker Hub tags](https://hub.docker.com/r/sungp2708/dbvault/tags)
 for available versions and sizes.
 
 #### Versioned registry images (`v0.4.0` and later)
@@ -242,8 +240,8 @@ Tags include the DBVault version and bundled engine/client version:
 | Engine | Image tag pattern |
 |---|---|
 | PostgreSQL 16 | `ghcr.io/sung2708/dbvault:vX.Y.Z-postgres16` |
-| PostgreSQL 17 | `ghcr.io/sung2708/dbvault:vX.Y.Z-postgres17` (after v0.9.2) |
-| PostgreSQL 18 | `ghcr.io/sung2708/dbvault:vX.Y.Z-postgres18` (after v0.9.2) |
+| PostgreSQL 17 | `ghcr.io/sung2708/dbvault:vX.Y.Z-postgres17` (v0.10.0 and later) |
+| PostgreSQL 18 | `ghcr.io/sung2708/dbvault:vX.Y.Z-postgres18` (v0.10.0 and later) |
 | MySQL 8.4 | `ghcr.io/sung2708/dbvault:vX.Y.Z-mysql8.4` |
 | MongoDB 8 | `ghcr.io/sung2708/dbvault:vX.Y.Z-mongodb8` |
 | SQLite | `ghcr.io/sung2708/dbvault:vX.Y.Z-sqlite` |

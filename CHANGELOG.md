@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.0] - 2026-11-27
+
 ### Added
 - PostgreSQL 17 and 18 container images (`postgres17`, `postgres18`; GHCR
   `vX.Y.Z-postgres17`/`-postgres18`). `postgres` stays an alias of

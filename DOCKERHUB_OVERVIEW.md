@@ -6,12 +6,14 @@ DBVault is a command-line tool for backing up and restoring PostgreSQL, MySQL, M
 
 Choose the tag for your database engine. Images support Linux AMD64 and ARM64.
 
-| Tag | Included database tools | v0.9.2 download (AMD64 / ARM64) |
-| --- | --- | ---: |
-| `postgres` | PostgreSQL 16 client tools | 28.0 / 26.5 MB |
-| `mysql` | MySQL 8.4 client tools | 269.7 / 261.8 MB |
-| `mongodb` | MongoDB Database Tools `mongodump` and `mongorestore` | 37.1 / 34.6 MB |
-| `sqlite` | SQLite; no external database client required | 21.5 / 19.6 MB |
+| Tag | Included database tools |
+| --- | --- |
+| `postgres16` (also `postgres`) | PostgreSQL 16 client tools |
+| `postgres17` | PostgreSQL 17 client tools |
+| `postgres18` | PostgreSQL 18 client tools |
+| `mysql` | MySQL 8.4 client tools |
+| `mongodb` | MongoDB Database Tools 100.20.1 |
+| `sqlite` | Embedded SQLite |
 
 ## Pull an image
 
@@ -20,13 +22,11 @@ docker pull sungp2708/dbvault:postgres
 ```
 
 Replace `postgres` with `mysql`, `mongodb`, or `sqlite` to pull another variant.
-The published `postgres` tag bundles PostgreSQL 16 clients. The next tagged
-build will add `postgres16`, `postgres17` and `postgres18`; `postgres` will
-continue to point to 16. Match the client major to the server major.
+Starting with `v0.10.0`, use the numbered PostgreSQL alias matching the
+server major. The `postgres` alias continues to point to 16.
 
-Pin a published version for repeatable deployments, for example
-`v0.9.2-postgres`. The numbered PostgreSQL aliases and their versioned
-counterparts start with the first release after `v0.9.2`.
+Pin a version for repeatable deployments, for example `v0.10.0-postgres16`
+or `v0.10.0-mongodb`. The versioned `-postgres` alias remains available for 16.
 
 ## Check the CLI
 
