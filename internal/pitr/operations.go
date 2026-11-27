@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sung2708/DBVault/internal/config"
+	"github.com/sung2708/DBVault/internal/retention"
 	"github.com/sung2708/DBVault/internal/storage"
 )
 
@@ -67,21 +68,21 @@ func (s *Service) Backup(ctx context.Context, kind string, baseEvery time.Durati
 	if err != nil {
 		return Record{}, err
 	}
-	selected, selectedBase, err := selectParent(items, identity)
+	selected, selectedBase, chainLength, err := selectParent(items, identity)
 	if err != nil {
 		return Record{}, err
 	}
 	if selected.Name == "" || (baseEvery > 0 && time.Since(selectedBase) >= baseEvery) {
 		return s.base(ctx)
 	}
-	return s.capture(ctx, selected.Name)
+	return s.captureFrom(ctx, selected, chainLength)
 }
 
 // Validate the graph once and cache ancestry to avoid quadratic storage reads
 // when selecting a parent from a long native log history.
-func selectParent(items []Record, identity string) (Record, time.Time, error) {
+func selectParent(items []Record, identity string) (Record, time.Time, int, error) {
 	if _, err := SelectCleanup(items, config.Retention{}, time.Now()); err != nil {
-		return Record{}, time.Time{}, err
+		return Record{}, time.Time{}, 0, err
 	}
 	byName := map[string]Record{}
 	for _, m := range items {
@@ -114,13 +115,16 @@ func selectParent(items []Record, identity string) (Record, time.Time, error) {
 			selected, baseTime = m, at
 		}
 	}
-	return selected, baseTime, nil
+	if selected.Name == "" {
+		return selected, baseTime, 0, nil
+	}
+	return selected, baseTime, depths[selected.Name] + 1, nil
 }
 
 // SelectCleanup retains whole baseline chains. Count is a count of independent
 // recovery chains, not log objects; day retention uses each chain's newest end.
 func SelectCleanup(items []Record, policy config.Retention, now time.Time) ([]Record, error) {
-	if policy.KeepDays < 0 || policy.KeepCount < 0 {
+	if policy.Negative() {
 		return nil, fmt.Errorf("retention values must be nonnegative")
 	}
 	byName := map[string]Record{}
@@ -182,7 +186,7 @@ func SelectCleanup(items []Record, policy config.Retention, now time.Time) ([]Re
 		}
 	}
 	result := []Record{}
-	if policy.KeepDays == 0 && policy.KeepCount == 0 {
+	if !policy.Enabled() {
 		return result, nil
 	}
 	selected := map[string]bool{}
@@ -194,8 +198,15 @@ func SelectCleanup(items []Record, policy config.Retention, now time.Time) ([]Re
 			}
 			return byName[chains[i]].Until.After(byName[chains[j]].Until)
 		})
+		// Calendar rules date each chain by its newest recoverable point.
+		dated := make([]retention.Dated, len(chains))
 		for i, r := range chains {
-			if i == 0 || byName[r].Until.Equal(byName[chains[0]].Until) || i < policy.KeepCount || (policy.KeepDays > 0 && !tails[r].Before(cutoff)) {
+			dated[i] = retention.Dated{Name: r, At: tails[r]}
+		}
+		sort.SliceStable(dated, func(i, j int) bool { return dated[i].At.After(dated[j].At) })
+		calendar := retention.Calendar(dated, policy)
+		for i, r := range chains {
+			if i == 0 || byName[r].Until.Equal(byName[chains[0]].Until) || i < policy.KeepCount || (policy.KeepDays > 0 && !tails[r].Before(cutoff)) || calendar[r] {
 				continue
 			}
 			selected[r] = true
@@ -218,18 +229,18 @@ func SelectCleanup(items []Record, policy config.Retention, now time.Time) ([]Re
 // Cleanup validates retained and available expired archives before starting new deletions.
 // Dry runs validate the entire dependency graph and never delete archives.
 func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Record, err error) {
+	var pending []string
 	if !dry {
 		if err := s.Config.Storage.CheckDelete(); err != nil {
 			return nil, err
 		}
-	}
-	release, err := s.lock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release(&err)
-	if !dry {
-		if err := storage.ResumeDeletes(ctx, s.Store, ".pitr.json"); err != nil {
+		release, lockErr := s.lock(ctx)
+		if lockErr != nil {
+			return nil, lockErr
+		}
+		defer release(&err)
+		pending, err = storage.ResumeUnregisteredDeletes(ctx, s.Store, ".pitr.json")
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -238,14 +249,44 @@ func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Rec
 		return nil, err
 	}
 	candidates, err := SelectCleanup(items, s.Config.Retention, now)
-	if err != nil || dry || len(candidates) == 0 {
+	if err != nil || dry || (len(candidates) == 0 && len(pending) == 0) {
 		return candidates, err
 	}
 	expired := make(map[string]bool, len(candidates))
 	for _, m := range candidates {
 		expired[m.Name] = true
 	}
+	catalog := make(map[string]Record, len(items))
 	for _, m := range items {
+		catalog[m.Name] = m
+	}
+	needed := make(map[string]bool)
+	var retainedPending []string
+	for _, key := range pending {
+		if expired[key] {
+			continue
+		}
+		if _, ok := catalog[key]; !ok {
+			m, err := s.Read(ctx, key)
+			if err != nil {
+				return nil, fmt.Errorf("resolve pending PITR deletion for %s: %w", key, err)
+			}
+			if m.Engine != s.Config.Database.Type {
+				continue
+			}
+			return nil, fmt.Errorf("pending PITR deletion %s is missing from the catalog", key)
+		}
+		retainedPending = append(retainedPending, key)
+		if len(candidates) == 0 {
+			for parent := key; parent != "" && !needed[parent]; parent = catalog[parent].Parent {
+				needed[parent] = true
+			}
+		}
+	}
+	for _, m := range items {
+		if len(candidates) == 0 && !needed[m.Name] {
+			continue
+		}
 		if expired[m.Name] {
 			exists, err := s.Store.Exists(ctx, m.Name)
 			if err != nil {
@@ -266,6 +307,11 @@ func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []Rec
 		}
 		if removeErr != nil {
 			return nil, removeErr
+		}
+	}
+	for _, key := range retainedPending {
+		if err := storage.ClearPendingDelete(ctx, s.Store, key, ".pitr.json"); err != nil {
+			return nil, fmt.Errorf("clear pending PITR deletion for %s: %w", key, err)
 		}
 	}
 	for _, m := range candidates {

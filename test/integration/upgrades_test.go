@@ -32,6 +32,12 @@ func assertServerRecoveryUpgrade(t *testing.T, ctx context.Context, s *app.Servi
 	if result.Status != "passed" || result.TargetState != "removed" || result.BackupID != incremental.ID || result.Validation == nil || result.Validation.Objects < 1 {
 		t.Fatalf("invalid drill result %+v", result)
 	}
+	if s.Config.Protection != nil && s.Config.Protection.RecordRowCounts {
+		check := result.Validation.RowCheck
+		if incremental.RowCounts == nil || check == nil || check.Tables < 1 || check.Matched != check.Tables {
+			t.Fatalf("expected matching stored row counts: %+v", result.Validation)
+		}
+	}
 	record, err := s.Store.Get(ctx, result.RecordKey)
 	if err != nil {
 		t.Fatal(err)

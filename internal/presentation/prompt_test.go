@@ -31,7 +31,7 @@ func TestPromptColorsMessagesAndCancellation(t *testing.T) {
 			t.Setenv("NO_COLOR", "") // presence, even empty, disables color
 			var out bytes.Buffer
 			p := &TerminalPrompter{Out: &out, NoColor: noColor, Redactor: security.New("secret-value")}
-			theme := p.theme()
+			theme := p.themeStyles()
 			if strings.Contains(theme.Focused.Title.Render("title")+theme.Focused.SelectSelector.Render(">"), "\x1b[") {
 				t.Fatal("NO_COLOR ignored")
 			}

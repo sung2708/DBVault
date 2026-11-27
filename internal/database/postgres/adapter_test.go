@@ -75,8 +75,8 @@ func TestSafeCommands(t *testing.T) {
 }
 func TestVersions(t *testing.T) {
 	a := &Adapter{Runner: &fakeRunner{server: "170001"}}
-	if _, err := a.Preflight(context.Background()); err == nil {
-		t.Fatal("client mismatch accepted")
+	if _, err := a.Preflight(context.Background()); err == nil || !strings.Contains(err.Error(), "postgres17 DBVault image") {
+		t.Fatal("client mismatch accepted or lacks the matching image hint:", err)
 	}
 	if err := a.Compatible(database.Info{ServerVersion: "150001", RestoreToolVersion: "pg_restore (PostgreSQL) 16.4"}, "160004", "pg_dump (PostgreSQL) 16.4"); err == nil {
 		t.Fatal("downgrade accepted")

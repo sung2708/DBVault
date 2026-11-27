@@ -9,6 +9,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- PostgreSQL 17 and 18 container images (`postgres17`, `postgres18`; GHCR
+  `vX.Y.Z-postgres17`/`-postgres18`). `postgres` stays an alias of
+  `postgres16`. Choose the image matching the server's major version. The
+  `POSTGRES_MAJOR` build argument selects the client for local builds, and
+  images carry an `io.dbvault.postgres-major` label.
+- Calendar retention rules `retention.keep_daily`, `keep_weekly`,
+  `keep_monthly` and `keep_yearly` (and `cleanup --keep-daily` etc.) keep the
+  newest backup of each of the last N UTC days, ISO weeks, months and years
+  that contain a backup. They combine with `keep_days`/`keep_count` and also
+  apply to native PITR chains.
+- `storage.s3.object_lock` (`mode: GOVERNANCE|COMPLIANCE`, `days`) requests
+  Object Lock retention on every backup object, manifest and evidence record;
+  it requires `storage.s3.protect_deletes: true`.
+- `protection.record_row_counts` records per-table source row counts in each
+  backup manifest when counts fit within the time and size limits. Recovery
+  drills record missing tables and count differences as warnings because
+  the source counts come from a separate session. Older DBVault releases cannot read manifests with counts.
+- Long-running stages show progress in the terminal tab or taskbar (`OSC 9;4`)
+  on Windows Terminal, ConEmu, Ghostty, WezTerm and iTerm2 3.6.6+.
+  `DBVAULT_TERMINAL_PROGRESS=0` disables it.
+- `dbvault status --watch [--interval 30s]` refreshes the status in place until
+  Ctrl+C.
+
+### Changed
+- MongoDB restores accept `mongorestore` from the source's Database Tools
+  100.MINOR series at the same or a newer patch, instead of only the exact
+  source version. 100.20.1 images restore backups made with 100.20.0.
+- The PostgreSQL client-major mismatch error names the matching image tag.
+- Interactive prompts and the backup picker run on Charm Huh v2, Bubble Tea v2
+  and Lip Gloss v2. Keys, inline rendering, `NO_COLOR`/`--no-color`,
+  `TERM=dumb` fallback and cancellation behave as before; pasting a backup
+  name after `/` filters the list immediately.
+
+### Fixed
+- Keep the newest whole-database backup when a newer selective backup exists.
+  Health, recovery selection and metrics use the configured backup scope.
+- Resume interrupted deletion safely for both logical and PITR backups.
+  Protect registered incremental dependencies even when their archives are
+  temporarily missing.
+- Keep recovery and restore history records readable within their size limits.
+  Apply the history limit before fetching older records.
+- Base PITR freshness on captured log ranges. Native cleanup previews use
+  read-only storage, and native health reuses its initial catalog.
+- Preserve the previous status frame when a watch refresh fails. Watch requires
+  terminal cursor controls.
+
+### Security
+- Rebuild MongoDB Database Tools from the 100.20.1 security release
+  (`mongodump` path traversal, `mongorestore` crafted collection names,
+  secret redaction in errors), with `x/net` 0.63.0 and `x/crypto` 0.59.0.
+- Update Go dependencies to current patch/minor releases, including
+  `golang.org/x/crypto` v0.59.0 (replacing the v0.9.1 pseudo-version),
+  `golang.org/x/net` v0.63.0, the AWS, Google Cloud and MongoDB SDKs, and
+  `modernc.org/sqlite` v1.63.0.
+
 ## [v0.9.2] - 2026-11-11
 
 ### Security

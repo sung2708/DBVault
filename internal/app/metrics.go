@@ -46,9 +46,26 @@ func (s *Service) recordOperation(ctx context.Context, op string, start time.Tim
 // Metrics reads durable operation records. Counters cover this feature's records,
 // not historical runs made before records existed. Scrapes never open archives.
 func (s *Service) Metrics(ctx context.Context) (string, error) {
+	snapshot, err := s.ReadMetrics(ctx)
+	return snapshot.Text(s.now()), err
+}
+
+type MetricsSnapshot struct {
+	text, labels string
+	backupAt     time.Time
+}
+
+func (m MetricsSnapshot) Text(now time.Time) string {
+	if m.backupAt.IsZero() {
+		return m.text
+	}
+	return m.text + fmt.Sprintf("dbvault_backup_age_seconds{%s} %g\n", m.labels, max(0, now.Sub(m.backupAt).Seconds()))
+}
+
+func (s *Service) ReadMetrics(ctx context.Context) (MetricsSnapshot, error) {
 	objects, err := s.Store.List(ctx, "operation_")
 	if err != nil {
-		return "", err
+		return MetricsSnapshot{}, err
 	}
 	type counts struct {
 		success, failure int64
@@ -62,22 +79,22 @@ func (s *Service) Metrics(ctx context.Context) (string, error) {
 		}
 		r, err := s.Store.Get(ctx, object.Key)
 		if err != nil {
-			return "", err
+			return MetricsSnapshot{}, err
 		}
 		data, err := io.ReadAll(io.LimitReader(r, (16<<10)+1))
 		r.Close()
 		if err != nil {
-			return "", err
+			return MetricsSnapshot{}, err
 		}
 		if len(data) > 16<<10 {
-			return "", fmt.Errorf("oversized operation metrics record")
+			return MetricsSnapshot{}, fmt.Errorf("oversized operation metrics record")
 		}
 		var record operationRecord
 		if err = json.Unmarshal(data, &record); err != nil {
-			return "", fmt.Errorf("invalid operation metrics record")
+			return MetricsSnapshot{}, fmt.Errorf("invalid operation metrics record")
 		}
 		if record.Version != 1 || totals[record.Operation] == nil || record.CompletedAt.Before(record.StartedAt) || record.Bytes < 0 {
-			return "", fmt.Errorf("invalid operation metrics fields")
+			return MetricsSnapshot{}, fmt.Errorf("invalid operation metrics fields")
 		}
 		if record.Engine != s.Config.Database.Type || record.Database != s.Config.Database.Database {
 			continue
@@ -109,14 +126,17 @@ func (s *Service) Metrics(ctx context.Context) (string, error) {
 	fmt.Fprintf(&out, "dbvault_backup_bytes_total{%s} %d\n", labels, totals["backup"].bytes)
 	items, err := s.List(ctx, "")
 	if err != nil {
-		return "", err
+		return MetricsSnapshot{}, err
 	}
 	out.WriteString("# HELP dbvault_last_backup_timestamp_seconds Latest completed backup start time.\n# TYPE dbvault_last_backup_timestamp_seconds gauge\n# HELP dbvault_last_backup_size_bytes Latest completed stored artifact size.\n# TYPE dbvault_last_backup_size_bytes gauge\n# HELP dbvault_backup_age_seconds Age of latest completed backup.\n# TYPE dbvault_backup_age_seconds gauge\n")
+	snapshot := MetricsSnapshot{labels: labels}
 	for _, m := range items {
-		if m.Database.Engine == s.Config.Database.Type && m.Database.Name == s.Config.Database.Database {
-			fmt.Fprintf(&out, "dbvault_last_backup_timestamp_seconds{%s} %d\ndbvault_last_backup_size_bytes{%s} %d\ndbvault_backup_age_seconds{%s} %g\n", labels, m.CreatedAt.Unix(), labels, m.Pipeline.Stored, labels, max(0, s.now().Sub(m.CreatedAt).Seconds()))
+		if s.MatchesBackup(m) {
+			fmt.Fprintf(&out, "dbvault_last_backup_timestamp_seconds{%s} %d\ndbvault_last_backup_size_bytes{%s} %d\n", labels, m.CreatedAt.Unix(), labels, m.Pipeline.Stored)
+			snapshot.backupAt = m.CreatedAt
 			break
 		}
 	}
-	return out.String(), nil
+	snapshot.text = out.String()
+	return snapshot, nil
 }

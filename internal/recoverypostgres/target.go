@@ -62,6 +62,16 @@ func (t *Target) capture(ctx context.Context, args ...string) (string, error) {
 
 type limitedOutput struct{ bytes.Buffer }
 
+// countOutput holds per-table counts, which can exceed diagnostic limits.
+type countOutput struct{ bytes.Buffer }
+
+func (b *countOutput) Write(p []byte) (int, error) {
+	if b.Len()+len(p) > 1<<20 {
+		return 0, fmt.Errorf("row count output exceeds limit")
+	}
+	return b.Buffer.Write(p)
+}
+
 func (b *limitedOutput) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 1<<20 {
 		return 0, fmt.Errorf("Docker diagnostic output exceeds limit")
@@ -217,13 +227,18 @@ func (t *Target) Stop(ctx context.Context) error {
 	return err
 }
 
-func (t *Target) ValidateRecovery(ctx context.Context) (database.RecoveryValidation, error) {
+func (t *Target) ValidateRecovery(ctx context.Context, countRows bool) (database.RecoveryValidation, error) {
 	if err := t.Check(ctx); err != nil {
 		return database.RecoveryValidation{}, err
 	}
 	// Read every ordinary table/materialized view. No expected application dataset
 	// is available in a logical dump manifest, so do not claim semantic validation.
-	sql := `BEGIN READ ONLY; DO $$ DECLARE r record; BEGIN FOR r IN SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE (c.relkind = 'r' OR (c.relkind = 'm' AND c.relispopulated)) AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' LOOP EXECUTE format('SELECT count(*) FROM %I.%I', r.nspname, r.relname); END LOOP; END $$; SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','m') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%'; COMMIT;`
+	const objectCount = `SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','m') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%'`
+	sql := "BEGIN READ ONLY; "
+	if !countRows {
+		sql += `DO $$ DECLARE r record; BEGIN FOR r IN SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE (c.relkind = 'r' OR (c.relkind = 'm' AND c.relispopulated)) AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' LOOP EXECUTE format('SELECT count(*) FROM %I.%I', r.nspname, r.relname); END LOOP; END $$; `
+	}
+	sql += objectCount + "; COMMIT;"
 	var b limitedOutput
 	err := t.Adapter.Runner.Run(ctx, runner.Spec{Executable: "psql", Args: []string{"--no-psqlrc", "--no-password", "--quiet", "--tuples-only", "--no-align", "--set=ON_ERROR_STOP=1", "--command=" + sql}, Env: map[string]string{"PGHOST": "127.0.0.1", "PGPORT": "5432", "PGUSER": "postgres", "PGDATABASE": t.Config.Database, "PGPASSWORD": t.Password, "PGSSLMODE": "disable", "PGOPTIONS": ""}, Stdout: &b})
 	if err != nil {
@@ -233,7 +248,18 @@ func (t *Target) ValidateRecovery(ctx context.Context) (database.RecoveryValidat
 	if err != nil || n < 0 {
 		return database.RecoveryValidation{}, fmt.Errorf("invalid PostgreSQL recovery validation result")
 	}
-	return database.RecoveryValidation{Method: ValidationMethod, Objects: n}, nil
+	if !countRows {
+		return database.RecoveryValidation{Method: ValidationMethod, Objects: n}, nil
+	}
+	var counts countOutput
+	if err := t.Adapter.Runner.Run(ctx, runner.Spec{Executable: "psql", Args: postgres.RowCountArgs, Env: map[string]string{"PGHOST": "127.0.0.1", "PGPORT": "5432", "PGUSER": "postgres", "PGDATABASE": t.Config.Database, "PGPASSWORD": t.Password, "PGSSLMODE": "disable", "PGOPTIONS": ""}, Stdout: &counts}); err != nil {
+		return database.RecoveryValidation{}, err
+	}
+	rows, err := database.ParsePairs(counts.String())
+	if err != nil {
+		return database.RecoveryValidation{}, err
+	}
+	return database.RecoveryValidation{Method: ValidationMethod, Objects: n, Rows: rows}, nil
 }
 
 type containerRunner struct{ target *Target }

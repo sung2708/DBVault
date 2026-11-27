@@ -5,7 +5,9 @@ command discovery; `internal/presentation` uses Lip Gloss for restrained cyan
 headings and semantic status colors. Core `internal/app` emits neutral events
 without importing terminal libraries. No backup/restore semantics are changed.
 
-`init` adds optional inline forms through Charm Huh in the presentation layer.
+`init` adds optional inline forms through Charm Huh v2 (on Bubble Tea v2 and
+Lip Gloss v2) in the presentation layer. Styles use basic ANSI colors, so the
+terminal's own light/dark palette applies; when color is off they are unstyled.
 The onboarding workflow uses an injected Prompter interface, without terminal
 dependencies. Questions support arrows/Enter, Esc and Ctrl+C, with masked secret
 input for temporary connection tests. No alternate-screen dashboard or mouse UI
@@ -51,6 +53,20 @@ then throughput. These measure bytes consumed
 by the pipeline, not rows committed or network acknowledgments. Stage completion
 appears only after the relevant operation returns successfully. Short stages do
 not animate; cancellation stops and clears the one owned transient stderr line.
+
+On terminals known to render it, the same progress also appears in the tab or
+taskbar through the ConEmu `OSC 9;4` sequence: a percentage with a known total,
+otherwise an indeterminate state. It is sent only to Windows Terminal, ConEmu,
+Ghostty, WezTerm and iTerm2 3.6.6 or newer (older iTerm2 and some terminals
+show `OSC 9` as a desktop notification), never through tmux or screen, and only
+when the progress line itself animates. It is refreshed at least every second
+and cleared when a stage completes, fails or is cancelled.
+`DBVAULT_TERMINAL_PROGRESS=0` disables it; `=1` forces it on.
+
+`status --watch` redraws the status block in place at an interval, using
+cursor movement over the previous frame rather than the alternate screen, and
+counts terminal-wrapped rows so a narrow window redraws cleanly. Watch requires
+a terminal on stdout and human output.
 
 `--output json` and legacy `--json` bypass human rendering. Stdout remains the
 existing JSON result schema; stderr contains JSON logs/errors only, with no ANSI,

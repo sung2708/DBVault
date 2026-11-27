@@ -15,13 +15,13 @@ Python 3 and is shipped in the source tree under `scripts/monitor-backups.py`.
 This document describes how to install DBVault, configure native database dependencies across supported operating systems, and verify your environment.
 
 The current source requires Go 1.26.0 or later and specifies Go 1.26.11 as its
-preferred toolchain. CI uses that toolchain for `v0.9.0`.
+preferred toolchain. CI reads the toolchain selection from `go.mod`.
 Published releases include binary archives. The tag-triggered workflow builds
 Linux amd64/arm64, macOS amd64/arm64 and Windows amd64, injecting the real tag,
 commit and UTC build time into `dbvault version`. It publishes archives only when
 maintainers push a release tag. Native database tools are not included in those
-archives. Docker runtime targets provide PostgreSQL client 16, MySQL 8.4 clients,
-MongoDB Database Tools, or embedded SQLite. Choose the target for your engine.
+archives. The published `v0.9.2` Docker targets provide PostgreSQL 16 clients,
+MySQL 8.4 clients, MongoDB Database Tools 100.20.0, or embedded SQLite. Choose the target for your engine.
 The MySQL image ships `mysql`, `mysqldump` and `mysqlbinlog` for DBVault's
 workflows. As of `v0.9.1`, it omits MySQL Shell (`mysqlsh`). The MongoDB image
 uses `mongodump` and `mongorestore` for backup and restore.
@@ -174,19 +174,24 @@ is required. Both source and restore destination files must already exist.
 
 `docker build --target postgres -t dbvault:postgres .` builds the default image.
 Use `--target mysql`, `mongodb` or `sqlite` for other engines. The current
-Dockerfile builds the PostgreSQL 16 and MongoDB client images on Alpine 3.24.
-PostgreSQL clients come from the official PostgreSQL 16 Alpine image.
-MongoDB uses a DBVault rebuild of Database Tools 100.20.0 with patched
+Dockerfile builds the PostgreSQL and MongoDB client images on Alpine 3.24.
+PostgreSQL clients come from the official PostgreSQL Alpine image selected by
+the `POSTGRES_MAJOR` build argument: 16 (default), 17 or 18, for example
+`docker build --target postgres --build-arg POSTGRES_MAJOR=18 -t dbvault:postgres18 .`.
+Use the image matching the server's major version: DBVault rejects other
+`pg_dump` majors, and a newer `pg_restore` cannot restore into PostgreSQL 16
+(it sets `transaction_timeout`, which 16 does not recognize).
+MongoDB uses a DBVault rebuild of Database Tools 100.20.1 with patched
 x/net and x/crypto dependencies. MySQL uses Oracle MySQL 8.4 clients.
-For an existing MongoDB backup, use a restore tool matching the exact tools
-version recorded in its manifest. Every runtime uses a non-root user. Mount
+For an existing MongoDB backup, use a restore tool from the same Database Tools
+100.MINOR series as its manifest, at the same or a newer patch; 100.20.1 restores
+100.20.0 backups. Every runtime uses a non-root user. Mount
 a config, private backup directory and any SQLite database with permissions
 for that user.
-Set credentials by environment variable name/secret injection. The new release
-workflow publishes Linux amd64/arm64 images to GHCR after binary release success.
-The first container release is `v0.4.0`; images become available only after its
-release workflow succeeds. For builds, `VERSION`, `COMMIT` and `BUILD_DATE` are optional
-build arguments; their defaults identify development builds.
+Set credentials by environment variable name or secret injection. The release
+workflow publishes Linux amd64/arm64 images to GHCR and Docker Hub after the
+binary release succeeds. For local builds, `VERSION`, `COMMIT` and `BUILD_DATE`
+are optional and default to development metadata.
 
 To package an already cross-compiled Linux binary, Buildx can override the build
 stage with a named context:
@@ -204,11 +209,12 @@ MongoDB clients are built with CGO and the upstream `gssapi,failpoints` tags.
 Both runtimes include CA certificates and timezone data.
 
 The MongoDB Tools rebuild starts from upstream source commit
-`7536fd7f3d67f5115de3eb2e271b327b7ce329b9` (100.20.0), verified by SHA-256
-in the Dockerfile. Its Go dependencies use x/net 0.62.0 and x/crypto
-`v0.58.1-0.20261009181718-2f1f834330b2`. The reported source commit ends
-with `-dbvault` to identify the rebuild. The archive tool version stays
-100.20.0. CI tests archive restore in both directions with upstream tools.
+`99fd6bc7140e31e0287a9b4ef7e03194d834c7f0` (the 100.20.1 security release),
+verified by SHA-256 in the Dockerfile. Its Go dependencies use x/net 0.63.0
+and x/crypto 0.59.0. The reported source commit ends with `-dbvault` to
+identify the rebuild. CI tests archive restore in both directions with upstream
+tools. Images up to v0.9.2 packaged 100.20.0 from commit
+`7536fd7f3d67f5115de3eb2e271b327b7ce329b9`.
 The runtime includes the Kerberos libraries required by GSSAPI.
 
 Docker Scout may report CVE-2026-107891 against musl 1.2.6-r3 by applying
@@ -216,7 +222,13 @@ the edge branch's r6 threshold. Alpine's security tracker confirms that
 the 3.24 branch is fixed in 1.2.6-r3. CI checks this branch's minimum
 version. See the [Alpine advisory](https://security.alpinelinux.org/vuln/CVE-2026-107891).
 Scan each final image digest because advisory data changes over time.
-These client runtime changes start with `v0.9.2`.
+PostgreSQL 17/18 images and the MongoDB 100.20.1 rebuild are unreleased.
+See the changelog for the client updates shipped in `v0.9.2`.
+
+Docker Hub retains the four engine aliases and the v0.9.2 and v0.9.1
+versioned images. If your deployment pins an older Docker Hub tag, update it
+to a retained version before pulling. See the [Docker Hub tags](https://hub.docker.com/r/sungp2708/dbvault/tags)
+for available versions and sizes.
 
 #### Versioned registry images (`v0.4.0` and later)
 
@@ -225,6 +237,8 @@ Tags include the DBVault version and bundled engine/client version:
 | Engine | Image tag pattern |
 |---|---|
 | PostgreSQL 16 | `ghcr.io/sung2708/dbvault:vX.Y.Z-postgres16` |
+| PostgreSQL 17 | `ghcr.io/sung2708/dbvault:vX.Y.Z-postgres17` (after v0.9.2) |
+| PostgreSQL 18 | `ghcr.io/sung2708/dbvault:vX.Y.Z-postgres18` (after v0.9.2) |
 | MySQL 8.4 | `ghcr.io/sung2708/dbvault:vX.Y.Z-mysql8.4` |
 | MongoDB 8 | `ghcr.io/sung2708/dbvault:vX.Y.Z-mongodb8` |
 | SQLite | `ghcr.io/sung2708/dbvault:vX.Y.Z-sqlite` |

@@ -109,7 +109,7 @@ func (s *Service) verifyStored(ctx context.Context, key string) (metadata.Manife
 	}
 	defer r.Close()
 	s.stage("verify", "start")
-	digest, n, err := pipeline.Hash(ctx, s.meter(r, "verify", m.Pipeline.Stored), io.Discard)
+	digest, n, err := pipeline.Hash(ctx, s.meter(boundedArtifact(r, m.Pipeline.Stored), "verify", m.Pipeline.Stored), io.Discard)
 	if err != nil {
 		return m, n, fault.Wrap(fault.Storage, "read artifact during verification", err)
 	}
@@ -187,7 +187,7 @@ func newVerificationRecord(m metadata.Manifest, result VerificationResult, at ti
 		return VerificationRecord{}, "", err
 	}
 	id := hex.EncodeToString(b)
-	key := "verification_" + id + ".json"
+	key := evidencePrefix("verification_", m.ID) + id + ".json"
 	category := result.FailureCategory
 	record := VerificationRecord{Version: 1, ID: id, RecordKey: key, BackupID: m.ID, BackupName: m.Name, Engine: m.Database.Engine, Database: m.Database.Name, Checksum: m.Checksum.Hash, Algorithm: "sha256", Status: result.Status, FailureCategory: category, Bytes: result.Bytes, CompletedAt: at.UTC()}
 	return record, key, nil

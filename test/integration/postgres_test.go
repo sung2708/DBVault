@@ -139,6 +139,9 @@ func TestPostgresBackupDestroyRestore(t *testing.T) {
 			defer store.Close()
 			cfg.Compression.Type = kind
 			s := &app.Service{Config: cfg, DB: adapter, Store: store, Version: "integration"}
+			if kind == "none" {
+				s.Config.Protection = &config.Protection{RecordRowCounts: true}
+			}
 			m, err := s.Backup(ctx, "full", false)
 			if err != nil {
 				t.Fatal(err)

@@ -31,38 +31,41 @@ func (s *Service) nativeHealth(ctx context.Context, verify bool) (HealthReport, 
 		h.MaxAgeSeconds = &seconds
 	}
 	native := pitr.Service{Config: s.Config, Store: s.Store}
-	items, err := native.List(ctx)
+	items, objects, err := native.ReadCatalog(ctx)
 	if err != nil {
 		h.Reason = "Native metadata listing unavailable or invalid"
 		return finish(fault.Wrap(fault.Storage, "native health list", err))
 	}
 	var latest *pitr.Record
+	hasBaseline := false
 	for _, m := range items {
-		if m.Identity == h.SourceIdentity {
-			copy := m
-			latest = &copy
-			break
+		if m.Identity != h.SourceIdentity {
+			continue
 		}
+		if m.Kind == "base" {
+			hasBaseline = true
+			continue
+		}
+		latest = &m
+		break
 	}
 	if latest == nil {
 		h.Status = Critical
 		h.Reason = "No registered native backup for the configured source identity"
+		if hasBaseline {
+			h.Reason = "Native baseline exists; waiting for the first log capture"
+		}
 		return finish(nil)
 	}
 	h.BackupName = latest.Name
 	h.StoredBytes = latest.Size
 	at := latest.Until.UTC()
 	h.LastBackupAt = &at
-	chain, err := native.Chain(ctx, latest.Name)
+	chain, err := pitr.CatalogChain(ctx, items, latest.Name)
 	if err != nil {
 		h.Status = Critical
 		h.Reason = "Native dependency chain is missing or invalid"
 		return finish(fault.Wrap(fault.Integrity, "native health chain", err))
-	}
-	objects, err := s.Store.List(ctx, "pitr_")
-	if err != nil {
-		h.Reason = "Native artifact listing unavailable"
-		return finish(fault.Wrap(fault.Storage, "native health artifacts", err))
 	}
 	sizes := map[string]int64{}
 	for _, o := range objects {

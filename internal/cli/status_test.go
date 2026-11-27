@@ -109,3 +109,22 @@ func TestStatusHelp(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusWatchRequiresInteractiveHumanOutput(t *testing.T) {
+	for _, args := range [][]string{
+		{"status", "--watch"},
+		{"status", "--watch", "--output", "json"},
+		{"status", "--interval", "1m"},
+		{"status", "--watch", "--interval", "1s"},
+	} {
+		var out, stderr bytes.Buffer
+		root := New(Build{}, &out, &stderr)
+		root.SetArgs(args)
+		if _, err := root.ExecuteContextC(context.Background()); err == nil {
+			t.Fatalf("%v accepted with non-terminal output", args)
+		}
+		if strings.Contains(out.String(), "\x1b[") {
+			t.Fatalf("%v drew to a non-terminal: %q", args, out.String())
+		}
+	}
+}

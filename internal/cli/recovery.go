@@ -62,7 +62,7 @@ func (o *options) recoveryCommand() *cobra.Command {
 					return e
 				}
 				for _, m := range items {
-					if m.Database.Engine == cfg.Database.Type && m.Database.Name == cfg.Database.Database {
+					if svc.MatchesBackup(m) {
 						drill.Target = m.Name
 						break
 					}
@@ -97,7 +97,7 @@ func (o *options) recoveryCommand() *cobra.Command {
 			return o.redactor.Error(checkErr)
 		},
 	}
-	c.Flags().BoolVar(&latest, "latest", false, "Select the latest completed backup matching configured engine/database")
+	c.Flags().BoolVar(&latest, "latest", false, "Select the latest completed backup matching the configured database and selectors")
 	c.Flags().StringVarP(&drill.Target, "target", "t", "", targetHelp)
 	c.Flags().StringVar(&drill.RecoveryDatabase, "recovery-database", "", "NEW SQLite file or lowercase database name in a new isolated server container")
 	c.Flags().BoolVar(&drill.Confirm, "confirm", false, "Authorize creating and restoring the isolated target")

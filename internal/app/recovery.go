@@ -157,6 +157,7 @@ func (s *Service) recoveryDrill(ctx context.Context, o DrillOptions, target data
 	work.Config.Database.Database = path
 	work.DB = target
 	var mu sync.Mutex
+	var sourceRows *metadata.RowCounts
 	observe := s.Observe
 	work.Observe = func(e Event) {
 		mu.Lock()
@@ -173,6 +174,7 @@ func (s *Service) recoveryDrill(ctx context.Context, o DrillOptions, target data
 			r.BackupID = e.Manifest.ID
 			r.Checksum = e.Manifest.Checksum.Hash
 			r.SourceDatabase = e.Manifest.Database.Name
+			sourceRows = e.Manifest.RowCounts
 		}
 		mu.Unlock()
 		if observe != nil {
@@ -256,11 +258,18 @@ func (s *Service) recoveryDrill(ctx context.Context, o DrillOptions, target data
 		return r, err
 	}
 	s.stage("recovery.validation", "start")
-	validation, err := validator.ValidateRecovery(ctx)
+	mu.Lock()
+	rows := sourceRows
+	mu.Unlock()
+	validation, err := validator.ValidateRecovery(ctx, rows != nil)
 	if err != nil {
 		return r, err
 	}
+	err = checkRows(&validation, rows)
 	r.Validation = &validation
+	if err != nil {
+		return r, err
+	}
 	stage("validation", "passed")
 	s.stage("recovery.validation", "complete")
 	if err := ctx.Err(); err != nil {
@@ -408,7 +417,7 @@ func (s *Service) recordDrill(ctx context.Context, r *DrillResult, redact func(s
 	if _, err := rand.Read(id); err != nil {
 		return err
 	}
-	r.RecordKey = "recovery_" + hex.EncodeToString(id) + ".recovery.json"
+	r.RecordKey = evidencePrefix("recovery_", r.BackupID) + hex.EncodeToString(id) + ".recovery.json"
 	persisted := *r
 	if redact != nil {
 		persisted.SourceDatabase = redact(persisted.SourceDatabase)
@@ -416,18 +425,45 @@ func (s *Service) recordDrill(ctx context.Context, r *DrillResult, redact func(s
 		persisted.BackupName = redact(persisted.BackupName)
 	}
 	b, err := json.Marshal(persisted)
+	if err == nil && len(b) > maxDrillRecordBytes && persisted.Validation != nil {
+		validation := *persisted.Validation
+		validation.Rows = nil
+		persisted.Validation = &validation
+		if validation.RowCheck != nil {
+			check := *validation.RowCheck
+			validation.RowCheck = &check
+			missing := min(len(check.Missing), 5)
+			differences := min(len(check.Differences), 5-missing)
+			check.OmittedDetails += len(check.Missing) + len(check.Differences) - missing - differences
+			check.Missing = check.Missing[:missing]
+			check.Differences = check.Differences[:differences]
+		}
+		b, err = json.Marshal(persisted)
+		if err == nil && len(b) > maxDrillRecordBytes && validation.RowCheck != nil {
+			check := validation.RowCheck
+			check.OmittedDetails += len(check.Missing) + len(check.Differences)
+			check.Missing = nil
+			check.Differences = nil
+			b, err = json.Marshal(persisted)
+		}
+	}
 	if err != nil {
 		return err
 	}
+	if len(b) > maxDrillRecordBytes {
+		return fmt.Errorf("recovery record exceeds 1 MiB")
+	}
 	return s.Store.Put(ctx, r.RecordKey, bytes.NewReader(b), int64(len(b)))
 }
+
+const maxDrillRecordBytes = 1 << 20
 
 // DecodeDrill validates evidence without accepting arbitrary/legacy JSON as a
 // passed recovery drill. Evidence is operator-controlled, not a signed attestation.
 func DecodeDrill(reader io.Reader) (DrillResult, error) {
 	var r DrillResult
-	b, err := io.ReadAll(io.LimitReader(reader, (1<<20)+1))
-	if err != nil || len(b) > 1<<20 {
+	b, err := io.ReadAll(io.LimitReader(reader, maxDrillRecordBytes+1))
+	if err != nil || len(b) > maxDrillRecordBytes {
 		return r, fmt.Errorf("unreadable or oversized recovery record")
 	}
 	d := json.NewDecoder(bytes.NewReader(b))
@@ -496,4 +532,20 @@ func DecodeDrill(reader io.Reader) (DrillResult, error) {
 		}
 	}
 	return r, nil
+}
+
+// checkRows compares restored counts with the backup's recorded source counts.
+// Without source counts the per-table counts are dropped, so default drill
+// records keep the format earlier DBVault releases read.
+func checkRows(v *database.RecoveryValidation, source *metadata.RowCounts) error {
+	if source == nil {
+		v.Rows = nil
+		return nil
+	}
+	if v.Rows == nil {
+		v.Rows = map[string]int64{}
+	}
+	check, err := database.CompareRows(source.Tables, source.Consistency, v.Rows)
+	v.RowCheck = &check
+	return err
 }

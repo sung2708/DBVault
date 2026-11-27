@@ -8,6 +8,7 @@ import (
 	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/database"
 	"github.com/sung2708/DBVault/internal/fault"
+	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/pipeline"
 	"io"
 	driver "modernc.org/sqlite"
@@ -175,7 +176,7 @@ func (a *Adapter) Compatible(target database.Info, sourceServer, sourceTool stri
 
 // ValidateRecovery checks the restored image read-only. It does not establish
 // application-specific business invariants or that every intended row was dumped.
-func (a *Adapter) ValidateRecovery(ctx context.Context) (database.RecoveryValidation, error) {
+func (a *Adapter) ValidateRecovery(ctx context.Context, countRows bool) (database.RecoveryValidation, error) {
 	result := database.RecoveryValidation{Method: "SQLite PRAGMA integrity_check and sqlite_schema query"}
 	db, err := open(a.Config.Database, "ro")
 	if err != nil {
@@ -207,7 +208,12 @@ func (a *Adapter) ValidateRecovery(ctx context.Context) (database.RecoveryValida
 	if count != 1 {
 		return result, fmt.Errorf("integrity_check returned no reliable result")
 	}
-	err = db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").Scan(&result.Objects)
+	if err = db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'").Scan(&result.Objects); err != nil {
+		return result, err
+	}
+	if countRows {
+		result.Rows, err = countTables(ctx, db)
+	}
 	return result, err
 }
 
@@ -222,4 +228,48 @@ func (a *Adapter) PreflightRecovery(ctx context.Context) (database.Info, error) 
 	defer db.Close()
 	err = db.QueryRowContext(ctx, "SELECT sqlite_version()").Scan(&info.ServerVersion)
 	return info, err
+}
+
+// CountRows counts rows per table of the live source, outside the backup
+// snapshot: concurrent writes can make the counts differ from the archive.
+func (a *Adapter) CountRows(ctx context.Context) (map[string]int64, error) {
+	db, err := open(a.Config.Database, "ro")
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	return countTables(ctx, db)
+}
+
+func countTables(ctx context.Context, db *sql.DB) (map[string]int64, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT GLOB 'sqlite_*' ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	if len(names) > metadata.MaxRowCountTables {
+		return nil, fmt.Errorf("too many tables to record row counts")
+	}
+	counts := map[string]int64{}
+	for _, name := range names {
+		var n int64
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM "`+strings.ReplaceAll(name, `"`, `""`)+`"`).Scan(&n); err != nil {
+			return nil, err
+		}
+		counts[name] = n
+	}
+	return counts, nil
 }

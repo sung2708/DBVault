@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -22,6 +23,11 @@ type Database struct {
 	IncludeCollections []string `json:"include_collections,omitempty"`
 	ExcludeCollections []string `json:"exclude_collections,omitempty"`
 }
+
+func (d Database) Selective() bool {
+	return len(d.IncludeTables)+len(d.ExcludeTables)+len(d.IncludeCollections)+len(d.ExcludeCollections) > 0
+}
+
 type Pipeline struct {
 	Compression string `json:"compression"`
 	Level       int    `json:"compression_level"`
@@ -44,7 +50,42 @@ type Delta struct {
 	Depth    int    `json:"depth"`
 }
 
+// RowCounts are the per-table (or per-collection) row counts of the source,
+// recorded when protection.record_row_counts is enabled. Consistency is
+// "snapshot" when the counts describe exactly the dumped data, or
+// "separate_transaction" when concurrent writes could make them differ.
+type RowCounts struct {
+	Consistency string           `json:"consistency"`
+	CountedAt   time.Time        `json:"counted_at"`
+	Tables      map[string]int64 `json:"tables"`
+}
+
+const maxManifestBytes = 1 << 20
+
+var ErrManifestTooLarge = errors.New("metadata exceeds 1 MiB")
+
+// MaxRowCountTables limits the number of recorded counts.
+const MaxRowCountTables = 5000
+
+func (r *RowCounts) validate() error {
+	if r.Consistency != "snapshot" && r.Consistency != "separate_transaction" {
+		return fmt.Errorf("invalid row_counts consistency")
+	}
+	if len(r.Tables) > MaxRowCountTables {
+		return fmt.Errorf("row_counts lists too many tables")
+	}
+	for name, n := range r.Tables {
+		if name == "" || n < 0 {
+			return fmt.Errorf("invalid row_counts entry")
+		}
+	}
+	return nil
+}
+
 type Manifest struct {
+	// RowCounts is set only when row counting is enabled; DBVault releases
+	// before it was introduced reject manifests that contain it.
+	RowCounts          *RowCounts  `json:"row_counts,omitempty"`
 	Encryption         *Encryption `json:"encryption,omitempty"`
 	Delta              *Delta      `json:"delta,omitempty"`
 	Version            string      `json:"manifest_version"`
@@ -83,6 +124,11 @@ func Identity(db, extension string, now time.Time) (string, string, error) {
 func (m Manifest) Validate() error {
 	if m.Version != "1.0" {
 		return fmt.Errorf("unsupported manifest_version")
+	}
+	if m.RowCounts != nil {
+		if err := m.RowCounts.validate(); err != nil {
+			return err
+		}
 	}
 	if m.Status != "completed" || m.Name == "" || m.ID == "" || (m.BackupType != "full" && m.BackupType != "incremental") {
 		return fmt.Errorf("invalid completed backup manifest")
@@ -151,12 +197,12 @@ func (m Manifest) Validate() error {
 }
 func Decode(r io.Reader) (Manifest, error) {
 	var m Manifest
-	data, err := io.ReadAll(io.LimitReader(r, (1<<20)+1))
+	data, err := io.ReadAll(io.LimitReader(r, maxManifestBytes+1))
 	if err != nil {
 		return m, fmt.Errorf("read metadata: %w", err)
 	}
-	if len(data) > 1<<20 {
-		return m, fmt.Errorf("metadata exceeds 1 MiB")
+	if len(data) > maxManifestBytes {
+		return m, ErrManifestTooLarge
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
@@ -173,5 +219,9 @@ func Encode(m Manifest) ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
-	return json.MarshalIndent(m, "", "  ")
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err == nil && len(data) > maxManifestBytes {
+		return nil, ErrManifestTooLarge
+	}
+	return data, err
 }

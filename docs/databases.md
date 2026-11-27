@@ -114,7 +114,8 @@ mysql --host=127.0.0.1 --port=3306 --user=root production_db
 - Restore always limits namespaces to the source database, remaps to the
   configured destination when needed, and supports repeatable `--collection`.
   `--clean` adds `--drop`. Restore is not atomic across collections.
-- Server major and Database Tools versions must match the source. Passwords
+- The server major must match the source. `mongorestore` must come from the
+  source's Database Tools 100.MINOR series, at the same or a newer patch. Passwords
   use a temporary private YAML file rather than process arguments.
 - TLS `require` and `verify-full` both verify certificates using system trust.
   Use `disable` only for trusted development networks. Custom CA configuration

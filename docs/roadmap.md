@@ -55,7 +55,43 @@ validation remain future milestones. See
 
 ### v0.10
 
-- [ ] Charm v2 (Huh/Lip Gloss) migration.
+- [x] Charm v2 migration: Huh v2, Bubble Tea v2 and Lip Gloss v2 under the
+  `charm.land` import paths, with unchanged prompt, color and fallback policy.
+  A pasted picker filter applies immediately (Huh v2 otherwise refreshes
+  matches only on the next key press).
+- [x] Current patch/minor Go dependencies, including the released
+  `golang.org/x/crypto` v0.59.0 in place of the v0.9.1 pseudo-version.
+- [x] Container security refresh: MongoDB Database Tools rebuilt from the
+  100.20.1 security release with `x/net` 0.63.0 and `x/crypto` 0.59.0.
+  `mongorestore` accepts a newer patch of the source 100.MINOR series, so
+  100.20.0 backups remain restorable. PostgreSQL images rebuild from the
+  current official minor release of each major.
+- [x] PostgreSQL 17 and 18 client images (`postgres17`, `postgres18`) next to
+  `postgres16`/`postgres`. Clients still match the server major: a PostgreSQL
+  17+ `pg_restore` cannot restore into PostgreSQL 16, and an older one cannot
+  read newer archives.
+
+- [x] Calendar (grandfather-father-son) retention: `keep_daily`,
+  `keep_weekly`, `keep_monthly` and `keep_yearly`, for logical backups and
+  native PITR chains, with matching `cleanup` flags.
+- [x] Per-object S3 Object Lock retention (`storage.s3.object_lock`, GOVERNANCE
+  or COMPLIANCE) on archives, manifests and evidence, never on operation locks.
+- [x] Opt-in source row counts (`protection.record_row_counts`) compared by
+  recovery drills. Missing tables and count differences are warnings because
+  counts are taken outside the dump snapshot.
+- [x] Terminal tab/taskbar progress (`OSC 9;4`) on terminals known to render it.
+- [x] `status --watch` refreshes the status in place.
+
+### Candidates after v0.10
+
+- [ ] Snapshot-consistent row counts (PostgreSQL exported snapshot shared with
+  `pg_dump`) so count differences can fail drills.
+- [ ] `doctor` check that an `object_lock` bucket has Object Lock enabled.
+- [ ] Generic HTTPS webhook notifications with a stable JSON payload, then
+  first-party Microsoft Teams, Discord and email channels next to Slack.
+- [ ] Published image validation (see Phase 3).
+- [ ] `govulncheck` gating of release images' native tool binaries, not only
+  the DBVault module.
 
 ### Available in Phase 0:
 - [x] Comprehensive architectural blueprint and pipeline design.

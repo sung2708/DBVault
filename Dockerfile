@@ -1,3 +1,7 @@
+# PostgreSQL client major packaged by the postgres target: 16, 17 or 18.
+# Each must match the server major it backs up, so releases publish one image per major.
+ARG POSTGRES_MAJOR=16
+
 FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -44,19 +48,19 @@ ENTRYPOINT ["dbvault"]
 FROM golang:1.26-alpine3.24 AS mongodb-tools
 RUN apk add --no-cache build-base krb5-dev curl
 WORKDIR /tools
-# Preserve the archive format/tool version used by existing backups.
+# 100.20.1 security release; its archive format matches existing 100.20.0 backups.
 RUN curl --fail --location --retry 3 \
-        https://codeload.github.com/mongodb/mongo-tools/tar.gz/7536fd7f3d67f5115de3eb2e271b327b7ce329b9 \
+        https://codeload.github.com/mongodb/mongo-tools/tar.gz/99fd6bc7140e31e0287a9b4ef7e03194d834c7f0 \
         -o source.tar.gz \
-    && echo "cf456aea0f97ed79b52e3f920fba23516a1a458e2416f3a4e1022a5e35b73bfb  source.tar.gz" | sha256sum -c - \
+    && echo "f7cf82a58c73bbf5ebe80a1fba787dc0b75d481c6e8b31a81e30cce10efc4086  source.tar.gz" | sha256sum -c - \
     && tar -xzf source.tar.gz --strip-components=1 \
     && rm source.tar.gz
 ENV GOFLAGS=-mod=mod
 RUN set -eu; \
-    go get golang.org/x/net@v0.62.0 golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 \
+    go get golang.org/x/net@v0.63.0 golang.org/x/crypto@v0.59.0 \
     && for tool in mongodump mongorestore; do \
         CGO_ENABLED=1 go build -p 2 -trimpath -buildmode=pie -tags=gssapi,failpoints \
-            -ldflags "-s -w -X main.VersionStr=100.20.0 -X main.GitCommit=7536fd7f3d67f5115de3eb2e271b327b7ce329b9-dbvault" \
+            -ldflags "-s -w -X main.VersionStr=100.20.1 -X main.GitCommit=99fd6bc7140e31e0287a9b4ef7e03194d834c7f0-dbvault" \
             -o /out/$tool ./$tool/main/$tool.go; \
        done
 
@@ -82,9 +86,12 @@ WORKDIR /tmp
 ENTRYPOINT ["/usr/local/bin/dbvault"]
 
 # Client major must match the backup server major under DBVault's policy.
-FROM postgres:16-alpine3.24 AS postgres-tools
+# pg_restore 17+ emits SET transaction_timeout, which PostgreSQL 16 rejects.
+FROM postgres:${POSTGRES_MAJOR}-alpine3.24 AS postgres-tools
 
 FROM alpine:3.24 AS postgres
+ARG POSTGRES_MAJOR
+LABEL io.dbvault.postgres-major=${POSTGRES_MAJOR}
 RUN apk upgrade --no-cache \
     && apk add --no-cache ca-certificates krb5-libs libldap libedit libssl3 libcrypto3 \
         lz4-libs zstd-libs zlib tzdata \

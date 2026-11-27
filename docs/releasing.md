@@ -525,7 +525,7 @@ Locally compiled binaries and archives must not be checked into Git:
 - Compiled executables (`main.exe`, `dbvault`, `*.exe`, `*.dll`, `*.so`)
 - Local archives and compressed packages
 
-CI build systems (e.g., GoReleaser via GitHub Actions) reproducibly build and attach release packages to GitHub Releases from clean source tags.
+The tag-triggered GitHub Actions workflow builds release archives, attaches them to GitHub Releases, and then publishes container images.
 
 ---
 
@@ -561,7 +561,7 @@ GitHub Source Archive (Tarball/zip of Git tree)
 Binary Release Package (Minimal distribution archive)
 ```
 
-Packaging rules belong in release tooling (e.g., GoReleaser), not in Git tracking acrobatics.
+Define packaged files in the release workflow.
 
 ---
 
@@ -746,11 +746,13 @@ Create Annotated Git Tag from main (`git tag -a vX.Y.Z -m "DBVault vX.Y.Z"`)
          ↓
 Push Git Tag (`git push origin vX.Y.Z`)
          ↓
-Automated CI / GoReleaser Pipeline
+Tag-triggered GitHub Actions Release Workflow
          ↓
 Build Cross-Platform Binaries & Checksums
          ↓
 Publish GitHub Release with Release Notes
+         ↓
+Publish GHCR and Docker Hub Images
 ```
 
 ---

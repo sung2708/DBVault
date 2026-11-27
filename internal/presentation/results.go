@@ -281,6 +281,9 @@ func (r *Renderer) Result(operation string, value any) error {
 		if v.Validation != nil {
 			r.field(&b, "Validation", v.Validation.Method)
 			r.field(&b, "Objects", fmt.Sprint(v.Validation.Objects))
+			if c := v.Validation.RowCheck; c != nil {
+				r.rowCheck(&b, c)
+			}
 		}
 		if v.RecordKey != "" {
 			r.field(&b, "Drill record", v.RecordKey)
@@ -655,5 +658,42 @@ func (r *Renderer) table(b *strings.Builder, headers []string, rows [][]string) 
 	writeRow(headers, true)
 	for _, row := range rows {
 		writeRow(row, false)
+	}
+}
+
+// rowCheck summarizes the restored-versus-source row count comparison and
+// lists at most five mismatched tables.
+func (r *Renderer) rowCheck(b *strings.Builder, c *database.RowCheck) {
+	kind, text := "success", fmt.Sprintf("%d of %d tables match source counts", c.Matched, c.Tables)
+	if len(c.Missing) > 0 {
+		kind, text = "warning", fmt.Sprintf("%d source tables missing after restore", len(c.Missing))
+		if c.Consistency == "snapshot" {
+			kind = "error"
+		}
+	} else if len(c.Differences) > 0 {
+		kind = "warning"
+		if c.Consistency == "snapshot" {
+			kind = "error"
+		}
+		text = fmt.Sprintf("%d of %d tables differ from source counts", len(c.Differences), c.Tables)
+	}
+	fmt.Fprintln(b, r.outStyle.muted.Render(fmt.Sprintf("  %-13s ", "Row counts"))+r.status(kind, text, false))
+	shown := 0
+	for _, name := range c.Missing {
+		if shown == 5 {
+			break
+		}
+		fmt.Fprintf(b, "    %s missing\n", r.safe(name))
+		shown++
+	}
+	for _, d := range c.Differences {
+		if shown == 5 {
+			break
+		}
+		fmt.Fprintf(b, "    %s: source %d, restored %d\n", r.safe(d.Table), d.Source, d.Restored)
+		shown++
+	}
+	if c.Consistency != "snapshot" && (len(c.Differences) > 0 || len(c.Missing) > 0) {
+		r.hint(b, "Source counts were taken outside the dump snapshot; data or schema changes can explain differences.")
 	}
 }

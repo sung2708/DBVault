@@ -87,6 +87,9 @@ func TestMySQLBackupDestroyRestore(t *testing.T) {
 			defer p.Close()
 			cfg.Compression.Type = kind
 			s := &app.Service{Config: cfg, DB: adapter, Store: p, Version: "integration"}
+			if kind == "none" {
+				s.Config.Protection = &config.Protection{RecordRowCounts: true}
+			}
 			m, err := s.Backup(ctx, "full", false)
 			if err != nil {
 				t.Fatal(err)

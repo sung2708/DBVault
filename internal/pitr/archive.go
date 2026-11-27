@@ -142,16 +142,21 @@ func (s *Service) Read(ctx context.Context, name string) (Record, error) {
 // Native objects use a separate namespace. Logical retention/deletion cannot
 // accidentally remove log ranges or the physical base they depend on.
 func (s *Service) List(ctx context.Context) ([]Record, error) {
+	records, _, err := s.ReadCatalog(ctx)
+	return records, err
+}
+
+func (s *Service) ReadCatalog(ctx context.Context) ([]Record, []storage.ObjectMetadata, error) {
 	objects, e := s.Store.List(ctx, "pitr_")
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	records := []Record{}
 	for _, o := range objects {
 		if strings.HasSuffix(o.Key, ".pitr.json") {
 			m, e := s.Read(ctx, strings.TrimSuffix(o.Key, ".pitr.json"))
 			if e != nil {
-				return nil, e
+				return nil, nil, e
 			}
 			if m.Engine == s.Config.Database.Type {
 				records = append(records, m)
@@ -164,7 +169,7 @@ func (s *Service) List(ctx context.Context) ([]Record, error) {
 		}
 		return records[i].Until.After(records[j].Until)
 	})
-	return records, nil
+	return records, objects, nil
 }
 
 func (s *Service) publish(ctx context.Context, m Record, dir string) (Record, error) {
@@ -399,6 +404,10 @@ func (s *Service) unpack(ctx context.Context, m Record, dir string, validateOnly
 const maxChainRecords = 1024
 
 func (s *Service) chain(ctx context.Context, name string) ([]Record, error) {
+	return walkChain(ctx, name, s.Read)
+}
+
+func walkChain(ctx context.Context, name string, read func(context.Context, string) (Record, error)) ([]Record, error) {
 	var records []Record
 	seen := map[string]bool{}
 	for len(records) < maxChainRecords {
@@ -406,7 +415,7 @@ func (s *Service) chain(ctx context.Context, name string) ([]Record, error) {
 			return nil, fmt.Errorf("cyclic PITR chain")
 		}
 		seen[name] = true
-		m, e := s.Read(ctx, name)
+		m, e := read(ctx, name)
 		if e != nil {
 			return nil, e
 		}

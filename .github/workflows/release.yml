@@ -14,15 +14,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # One PostgreSQL image per server major: clients must match it.
+        # The unsuffixed Docker Hub postgres tags keep pointing at PostgreSQL 16.
         include:
           - target: postgres
+            postgres_major: '16'
             suffix: postgres16
+            hub: postgres16
+            hub_legacy: postgres
+          - target: postgres
+            postgres_major: '17'
+            suffix: postgres17
+            hub: postgres17
+          - target: postgres
+            postgres_major: '18'
+            suffix: postgres18
+            hub: postgres18
           - target: mysql
             suffix: mysql8.4
+            hub: mysql
           - target: mongodb
             suffix: mongodb8
+            hub: mongodb
           - target: sqlite
             suffix: sqlite
+            hub: sqlite
     steps:
       - uses: actions/checkout@v7
       - name: Resolve registry name and build time
@@ -51,19 +67,21 @@ jobs:
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.ref_name }}-${{ matrix.suffix }}
-            sungp2708/dbvault:${{ github.ref_name }}-${{ matrix.target }}
+            sungp2708/dbvault:${{ github.ref_name }}-${{ matrix.hub }}
+            ${{ matrix.hub_legacy && format('sungp2708/dbvault:{0}-{1}', github.ref_name, matrix.hub_legacy) || '' }}
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ steps.image.outputs.built }}
+            POSTGRES_MAJOR=${{ matrix.postgres_major || '16' }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ github.ref_name }}
             org.opencontainers.image.revision=${{ github.sha }}
           provenance: true
           sbom: true
-          cache-from: type=gha,scope=image-${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=image-${{ matrix.target }}
+          cache-from: type=gha,scope=image-${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.suffix }}
   dockerhub-aliases:
     needs: images
     runs-on: ubuntu-latest
@@ -92,7 +110,7 @@ jobs:
       - name: Promote versioned images
         if: steps.latest.outputs.promote == 'true'
         run: |
-          for engine in postgres mysql mongodb sqlite; do
+          for engine in postgres postgres16 postgres17 postgres18 mysql mongodb sqlite; do
             docker buildx imagetools create \
               --tag "sungp2708/dbvault:$engine" \
               "sungp2708/dbvault:$GITHUB_REF_NAME-$engine"

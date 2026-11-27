@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"regexp"
@@ -12,6 +13,7 @@ import (
 	"github.com/sung2708/DBVault/internal/database"
 	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/fault"
+	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/toolresolve"
 )
 
@@ -174,4 +176,79 @@ func (a *Adapter) Compatible(target database.Info, sourceServer, sourceTool stri
 	}
 	_, err = Series(sourceTool)
 	return err
+}
+
+// rowCountTablesSQL lists base tables hex-encoded so names survive batch-mode
+// escaping unambiguously.
+const rowCountTablesSQL = "SELECT HEX(table_name) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' ORDER BY table_name"
+
+// CountRowsWith counts rows of every base table in the current database. run
+// executes one SQL script (sent on stdin) in batch mode without column names.
+// Source adapters and recovery drills share it so table names line up.
+func CountRowsWith(ctx context.Context, run func(context.Context, string) (string, error)) (map[string]int64, error) {
+	listed, err := run(ctx, rowCountTablesSQL)
+	if err != nil {
+		return nil, err
+	}
+	counts := map[string]int64{}
+	var parts []string
+	for _, line := range strings.Split(strings.TrimSpace(listed), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		name, err := hex.DecodeString(line)
+		if err != nil || len(name) == 0 {
+			return nil, fmt.Errorf("invalid MySQL table listing")
+		}
+		quoted := "`" + strings.ReplaceAll(string(name), "`", "``") + "`"
+		parts = append(parts, "SELECT '"+line+"', COUNT(*) FROM "+quoted)
+	}
+	if len(parts) == 0 {
+		return counts, nil
+	}
+	if len(parts) > metadata.MaxRowCountTables {
+		return nil, fmt.Errorf("too many tables to record row counts")
+	}
+	out, err := run(ctx, strings.Join(parts, " UNION ALL ")+";")
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		name, errName := hex.DecodeString(key)
+		n, errCount := strconv.ParseInt(value, 10, 64)
+		if !ok || errName != nil || errCount != nil || n < 0 {
+			return nil, fmt.Errorf("invalid MySQL row count output")
+		}
+		counts[string(name)] = n
+	}
+	if len(counts) != len(parts) {
+		return nil, fmt.Errorf("incomplete MySQL row count output")
+	}
+	return counts, nil
+}
+
+// CountRows counts in a session separate from mysqldump's transaction, so
+// concurrent writes can make the counts differ from the dump.
+func (a *Adapter) CountRows(ctx context.Context) (map[string]int64, error) {
+	path, err := toolresolve.Resolve("mysql", a.Config.Tools["mysql"], a.Runner)
+	if err != nil {
+		return nil, err
+	}
+	return CountRowsWith(ctx, func(ctx context.Context, sql string) (string, error) {
+		out := &countOutput{}
+		args := append(a.args(), "--database="+a.Config.Database, "--batch", "--skip-column-names")
+		err := a.Runner.Run(ctx, runner.Spec{Executable: path, Args: args, Env: a.env(), Stdin: strings.NewReader(sql), Stdout: out})
+		return string(out.data), err
+	})
+}
+
+type countOutput struct{ data []byte }
+
+func (b *countOutput) Write(p []byte) (int, error) {
+	if len(b.data)+len(p) > 1<<20 {
+		return 0, fmt.Errorf("row count output too large")
+	}
+	b.data = append(b.data, p...)
+	return len(p), nil
 }

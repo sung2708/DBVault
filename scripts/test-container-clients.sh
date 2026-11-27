@@ -3,6 +3,8 @@ set -euo pipefail
 
 engine=${1:?engine required}
 image=${2:?client image required}
+# The PostgreSQL server major must match the packaged client major.
+postgres_major=${3:-16}
 server="dbvault-client-test-${engine}-$$"
 cleanup() {
   local status=$?
@@ -21,7 +23,7 @@ client() {
 case "$engine" in
   postgres)
     docker run --detach --name "$server" --network none \
-      -e POSTGRES_PASSWORD=dbvault-test postgres:16-bookworm >/dev/null
+      -e POSTGRES_PASSWORD=dbvault-test "postgres:${postgres_major}-bookworm" >/dev/null
     for attempt in {1..60}; do
       if docker exec "$server" pg_isready -h 127.0.0.1 -U postgres; then break; fi
       sleep 1
@@ -65,4 +67,6 @@ if [ "$engine" = postgres ]; then
   client pg_basebackup -h 127.0.0.1 -U postgres --pgdata=/tmp/base \
     --format=plain --wal-method=stream --checkpoint=fast
 fi
-echo "$engine: upstream and DBVault clients restored each other's archives"
+label=$engine
+if [ "$engine" = postgres ]; then label="postgres $postgres_major"; fi
+echo "$label: upstream and DBVault clients restored each other's archives"

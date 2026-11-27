@@ -284,13 +284,13 @@ func (t *Target) mongoScript(ctx context.Context, script string) (string, error)
 func (t *Target) mongoVersion(ctx context.Context) (string, error) {
 	return t.mongoScript(ctx, `print(a.runCommand({buildInfo:1}).version);`)
 }
-func (t *Target) ValidateRecovery(ctx context.Context) (database.RecoveryValidation, error) {
+func (t *Target) ValidateRecovery(ctx context.Context, countRows bool) (database.RecoveryValidation, error) {
 	if err := t.Check(ctx); err != nil {
 		return database.RecoveryValidation{}, err
 	}
 	if t.engine == "mongodb" {
 		name, _ := json.Marshal(t.Config.Database)
-		output, err := t.mongoScript(ctx, `const d=db.getSiblingDB(`+string(name)+`);const cs=d.getCollectionInfos({type:"collection"});for(const c of cs){const v=d.runCommand({validate:c.name,full:true});if(v.ok!==1||v.valid!==true)throw new Error("collection validation failed");d.getCollection(c.name).countDocuments({});}print("DBVAULT_COUNT="+cs.length);`)
+		output, err := t.mongoScript(ctx, `const d=db.getSiblingDB(`+string(name)+`);const cs=d.getCollectionInfos({type:"collection"});const recordRows=`+strconv.FormatBool(countRows)+`;const rows=Object.create(null);for(const c of cs){const v=d.runCommand({validate:c.name,full:true});if(v.ok!==1||v.valid!==true)throw new Error("collection validation failed");const n=d.getCollection(c.name).countDocuments({});if(recordRows&&!c.name.startsWith("system."))rows[c.name]=n;}if(recordRows)print("DBVAULT_ROWS="+JSON.stringify(rows));print("DBVAULT_COUNT="+cs.length);`)
 		if err != nil {
 			return database.RecoveryValidation{}, err
 		}
@@ -299,8 +299,21 @@ func (t *Target) ValidateRecovery(ctx context.Context) (database.RecoveryValidat
 		if len(v) != 2 {
 			return database.RecoveryValidation{}, fmt.Errorf("invalid MongoDB validation output")
 		}
-		n, e := strconv.ParseInt(v[1], 10, 64)
-		return database.RecoveryValidation{Method: MongoValidation, Objects: n}, e
+		n, err := strconv.ParseInt(v[1], 10, 64)
+		result := database.RecoveryValidation{Method: MongoValidation, Objects: n}
+		if err != nil || !countRows {
+			return result, err
+		}
+		rowsLine := regexp.MustCompile(`(?m)^DBVAULT_ROWS=(\{.*\})$`).FindStringSubmatch(output)
+		if len(rowsLine) != 2 {
+			return database.RecoveryValidation{}, fmt.Errorf("invalid MongoDB validation output")
+		}
+		rows := map[string]int64{}
+		if err := json.Unmarshal([]byte(rowsLine[1]), &rows); err != nil {
+			return database.RecoveryValidation{}, fmt.Errorf("invalid MongoDB document counts")
+		}
+		result.Rows = rows
+		return result, nil
 	}
 	args := []string{"--no-defaults", "--no-login-paths", "--host=127.0.0.1", "--port=3306", "--user=root", "--protocol=TCP", "--ssl-mode=REQUIRED", "--batch", "--skip-column-names", "--database=" + t.Config.Database}
 	var names limitedOutput
@@ -316,7 +329,10 @@ func (t *Target) ValidateRecovery(ctx context.Context) (database.RecoveryValidat
 		}
 		quoted := "`" + strings.ReplaceAll(strings.TrimSpace(name), "`", "``") + "`"
 		var out limitedOutput
-		sql := "CHECK TABLE " + quoted + "; SELECT COUNT(*) FROM " + quoted
+		sql := "CHECK TABLE " + quoted
+		if !countRows {
+			sql += "; SELECT COUNT(*) FROM " + quoted
+		}
 		if err := r.Run(ctx, runner.Spec{Executable: "mysql", Args: append(args, "--execute="+sql), Env: env, Stdout: &out}); err != nil {
 			return database.RecoveryValidation{}, err
 		}
@@ -325,7 +341,18 @@ func (t *Target) ValidateRecovery(ctx context.Context) (database.RecoveryValidat
 		}
 		count++
 	}
-	return database.RecoveryValidation{Method: MySQLValidation, Objects: count}, nil
+	if !countRows {
+		return database.RecoveryValidation{Method: MySQLValidation, Objects: count}, nil
+	}
+	rows, err := mysql.CountRowsWith(ctx, func(ctx context.Context, sql string) (string, error) {
+		var out limitedOutput
+		err := r.Run(ctx, runner.Spec{Executable: "mysql", Args: args, Env: env, Stdin: strings.NewReader(sql), Stdout: &out})
+		return out.String(), err
+	})
+	if err != nil {
+		return database.RecoveryValidation{}, err
+	}
+	return database.RecoveryValidation{Method: MySQLValidation, Objects: count, Rows: rows}, nil
 }
 
 type containerRunner struct{ target *Target }

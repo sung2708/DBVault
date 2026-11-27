@@ -52,28 +52,40 @@ func DeleteRegistered(ctx context.Context, store Provider, key, manifestSuffix s
 }
 
 func ResumeDeletes(ctx context.Context, store Provider, manifestSuffix string) error {
+	_, err := ResumeUnregisteredDeletes(ctx, store, manifestSuffix)
+	return err
+}
+
+// ResumeUnregisteredDeletes finishes incomplete removals and returns the registered keys awaiting a retention decision.
+func ResumeUnregisteredDeletes(ctx context.Context, store Provider, manifestSuffix string) ([]string, error) {
 	objects, err := store.List(ctx, "")
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var pending []string
 	suffix := manifestSuffix + deleteSuffix
 	for _, object := range objects {
 		key, ok := strings.CutSuffix(object.Key, suffix)
 		if !ok {
 			continue
 		}
-		// Registered entries must pass current dependency and retention checks.
 		registered, err := store.Exists(ctx, key+manifestSuffix)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if !registered {
-			if err := DeleteRegistered(ctx, store, key, manifestSuffix); err != nil {
-				return err
-			}
+		if registered {
+			pending = append(pending, key)
+			continue
+		}
+		if err := DeleteRegistered(ctx, store, key, manifestSuffix); err != nil {
+			return nil, err
 		}
 	}
-	return nil
+	return pending, nil
+}
+
+func ClearPendingDelete(ctx context.Context, store Provider, key, manifestSuffix string) error {
+	return store.Delete(ctx, key+manifestSuffix+deleteSuffix)
 }
 
 func DeletePending(ctx context.Context, store Provider, key, manifestSuffix string) (bool, error) {

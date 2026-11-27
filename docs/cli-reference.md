@@ -73,7 +73,17 @@ All commands inherit the following root flags:
 dbvault status [--timeout 30s] [--state .dbvault-schedules.json]
 dbvault status --output json
 dbvault status --no-color
+dbvault status --watch [--interval 30s]
 ```
+
+`--watch` redraws the human status in place every `--interval` (minimum 5s,
+default 30s) until Ctrl+C, which exits with code 0. It never uses the
+alternate screen, so the last frame stays visible. Each refresh lists storage,
+reads manifests and fetches evidence for the latest matching backup. Older
+records without a backup-specific key are cached after their first successful
+read in the watch session. `--timeout` applies to each refresh. A failed refresh
+keeps the previous frame and shows the error in the footer. `--watch` is
+rejected with `--output json`, `--quiet` or when stdout is not a terminal.
 
 Status aggregates the configured database's latest health evaluation, up to five
 validated recent manifests, exact-backup recovery evidence, storage type and
@@ -104,8 +114,8 @@ dbvault health --quiet
 ```
 
 Health evaluates the single database in the selected config, matching manifest
-engine and exact database name. It uses the existing validated completed sidecars,
-selecting the newest `created_at` (ties use backup name ascending). Age is measured
+engine, exact database name, and configured table or collection selectors.
+It selects the newest matching `created_at` (ties use backup name ascending). Age is measured
 from dump/snapshot start in UTC, so a long-running backup does not hide old data.
 Future creation/completion timestamps produce unknown rather than negative ages.
 There is no separate registry or multi-profile configuration.
@@ -203,6 +213,17 @@ new Docker-isolated server**. The current checkout also supports isolated
 MySQL/MongoDB targets using preloaded matching official images; see
 [encrypted and scheduled recovery operations](enhancements.md). No force
 bypass, existing-server target or arbitrary validation hook is provided.
+
+When the backup recorded source row counts (`protection.record_row_counts`),
+the drill also counts every restored table or collection and reports
+`Row counts`. Missing tables and count differences are warnings because source
+counts are taken outside the dump snapshot. The comparison is stored as
+`validation.row_check`. If full details would exceed the record size limit,
+the saved record keeps the match totals and reports how many details were
+omitted.
+
+`--latest` matches the configured database and its table or collection selectors.
+An empty selector configuration picks a whole-database backup.
 
 ### PostgreSQL (`v0.4.0`)
 
@@ -540,7 +561,7 @@ dbvault list --config dbvault.yaml
 
 ## 5. `dbvault cleanup`
 
-Applies retention policies (`keep_days` and `keep_count`) to delete stale backup archives and sidecar manifests.
+Applies retention policies (`keep_days`, `keep_count` and the calendar rules `keep_daily`, `keep_weekly`, `keep_monthly`, `keep_yearly`) to delete stale backup archives and sidecar manifests.
 
 ### Synopsis
 ```bash
@@ -553,6 +574,10 @@ dbvault cleanup [flags]
 | `--dry-run` | | boolean | `false` | Preview backups eligible for deletion without deleting them. |
 | `--keep-days` | | integer | Config value | Retain backups newer than N days. |
 | `--keep-count` | | integer | Config value | Retain the most recent N backups. |
+| `--keep-daily` | | integer | Config value | Keep the newest backup of each of the last N UTC days with a backup. |
+| `--keep-weekly` | | integer | Config value | Keep the newest backup of each of the last N ISO weeks with a backup. |
+| `--keep-monthly` | | integer | Config value | Keep the newest backup of each of the last N months with a backup. |
+| `--keep-yearly` | | integer | Config value | Keep the newest backup of each of the last N years with a backup. |
 
 ### Examples
 ```bash
@@ -561,6 +586,9 @@ dbvault cleanup --config dbvault.yaml --dry-run
 
 # Execute cleanup
 dbvault cleanup --config dbvault.yaml
+
+# Preview a 7 daily / 4 weekly / 12 monthly rotation
+dbvault cleanup --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --dry-run
 ```
 
 ---

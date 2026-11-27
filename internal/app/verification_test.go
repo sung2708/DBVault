@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -194,5 +195,89 @@ func TestVerifyDetectsValidButWrongManifestChecksum(t *testing.T) {
 	report, err := s.Health(context.Background(), false)
 	if err != nil || report.Databases[0].Integrity != "failed" {
 		t.Fatal(report, err)
+	}
+}
+
+func TestHealthVerifyRetriesFailedEvidence(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := setup(t, "none")
+	s.Config.Database.Type = "postgres"
+	s.Config.Health.MaxBackupAge = "12h"
+	m, err := s.Backup(ctx, "full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := s.Store
+	s.Store = verificationStore{Provider: store, failArtifactRead: true}
+	if _, err := s.Verify(ctx, m.Name); err == nil {
+		t.Fatal("expected storage read failure")
+	}
+	s.Store = store
+	passive, err := s.Health(ctx, false)
+	if err != nil || passive.Status != Critical {
+		t.Fatalf("passive health: %+v, %v", passive, err)
+	}
+	active, err := s.Health(ctx, true)
+	if err != nil || active.Status != Healthy || active.Databases[0].Integrity != "verified" || active.Databases[0].VerificationNote != "" {
+		t.Fatalf("active health: %+v, %v", active, err)
+	}
+}
+
+type healthReadOrder struct {
+	storage.Provider
+	keys []string
+}
+
+func (s *healthReadOrder) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	s.keys = append(s.keys, key)
+	return s.Provider.Get(ctx, key)
+}
+
+func TestActiveHealthVerifiesBeforeReadingRecoveryHistory(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := setup(t, "none")
+	s.Config.Database.Type = "postgres"
+	s.Config.Health.MaxBackupAge = "12h"
+	m, err := s.Backup(ctx, "full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const verificationKey = "verification_legacy.json"
+	const recoveryKey = "recovery_legacy.recovery.json"
+	for _, key := range []string{verificationKey, recoveryKey} {
+		if err := s.Store.Put(ctx, key, strings.NewReader("{}"), 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &healthReadOrder{Provider: s.Store}
+	s.Store = store
+	report, err := s.Health(ctx, true)
+	if err != nil || report.Status != Healthy || report.Databases[0].Integrity != "verified" {
+		t.Fatalf("health = %+v, error = %v", report, err)
+	}
+	archive := slices.Index(store.keys, m.Name)
+	recovery := slices.Index(store.keys, recoveryKey)
+	if archive < 0 || recovery <= archive || slices.Contains(store.keys, verificationKey) {
+		t.Fatalf("storage read order = %v", store.keys)
+	}
+}
+
+func TestVerifyStopsAtFirstByteBeyondStoredSize(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := setup(t, "none")
+	m, err := s.Backup(ctx, "full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Store.Delete(ctx, m.Name); err != nil {
+		t.Fatal(err)
+	}
+	size := m.Pipeline.Stored + 4096
+	if err := s.Store.Put(ctx, m.Name, bytes.NewReader(make([]byte, size)), size); err != nil {
+		t.Fatal(err)
+	}
+	_, read, err := s.verifyStored(ctx, m.Name)
+	if err == nil || read != m.Pipeline.Stored+1 {
+		t.Fatalf("read %d bytes, expected %d and a size mismatch: %v", read, m.Pipeline.Stored+1, err)
 	}
 }

@@ -11,7 +11,9 @@ import (
 
 type Capabilities struct {
 	TTY, Color, Unicode bool
-	Width               int
+	// Progress reports whether the terminal renders OSC 9;4 tab/taskbar progress.
+	Progress bool
+	Width    int
 }
 
 func Detect(w io.Writer) Capabilities {
@@ -25,6 +27,7 @@ func Detect(w io.Writer) Capabilities {
 	}
 	c.Color = c.TTY && os.Getenv("TERM") != "dumb"
 	c.Unicode = c.Color
+	c.Progress = c.Color && detectTerminalProgress()
 	return c
 }
 

@@ -19,7 +19,6 @@ import (
 	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/notify"
 	"github.com/sung2708/DBVault/internal/presentation"
-	"github.com/sung2708/DBVault/internal/retention"
 	"github.com/sung2708/DBVault/internal/security"
 	"github.com/sung2708/DBVault/internal/storage"
 	"github.com/sung2708/DBVault/internal/storage/providers"
@@ -123,6 +122,12 @@ func (o *options) load(c *cobra.Command) (config.Config, error) {
 		v, _ := c.Flags().GetInt("keep-count")
 		overrides.KeepCount = &v
 	}
+	for flag, target := range map[string]**int{"keep-daily": &overrides.KeepDaily, "keep-weekly": &overrides.KeepWeekly, "keep-monthly": &overrides.KeepMonthly, "keep-yearly": &overrides.KeepYearly} {
+		if c.Flags().Changed(flag) {
+			v, _ := c.Flags().GetInt(flag)
+			*target = &v
+		}
+	}
 	cfg, err := config.Load(o.configPath, overrides)
 	o.redactor = security.New(os.Getenv(cfg.Database.PasswordEnv), os.Getenv(cfg.Notifications.Slack.WebhookEnv), os.Getenv(cfg.Storage.S3.AccessKeyEnv), os.Getenv(cfg.Storage.S3.SecretKeyEnv), os.Getenv("AWS_ACCESS_KEY_ID"), os.Getenv("AWS_SECRET_ACCESS_KEY"), os.Getenv("AWS_SESSION_TOKEN"), os.Getenv(cfg.Storage.Azure.AccountKeyEnv), os.Getenv("AZURE_CLIENT_SECRET"))
 	if cfg.Encryption != nil {
@@ -185,6 +190,10 @@ func (o *options) command(name string) *cobra.Command {
 		f.Bool("dry-run", false, "Show candidates without deleting")
 		f.Int("keep-days", 0, "Protect backups within this many days (unset: config; 0: off)")
 		f.Int("keep-count", 0, "Protect recent backups per database (unset: config; 0: off)")
+		f.Int("keep-daily", 0, "Protect the newest backup of each of the last N UTC days with backups (unset: config; 0: off)")
+		f.Int("keep-weekly", 0, "Protect the newest backup of each of the last N ISO weeks with backups (unset: config; 0: off)")
+		f.Int("keep-monthly", 0, "Protect the newest backup of each of the last N months with backups (unset: config; 0: off)")
+		f.Int("keep-yearly", 0, "Protect the newest backup of each of the last N years with backups (unset: config; 0: off)")
 	case "test":
 		f.Duration("timeout", 30*time.Second, "Preflight deadline")
 	}
@@ -311,7 +320,7 @@ func (o *options) run(c *cobra.Command, name string) error {
 		handler = &presentation.HumanHandler{Renderer: display}
 	}
 	svc := &app.Service{Config: cfg, DB: adapter, Store: store, Logger: slog.New(handler), Version: o.build.Version}
-	if name != "list" && name != "cleanup" {
+	if name != "list" {
 		svc.Observe = display.Observe
 	}
 	if cfg.Notifications.Slack.Enabled && (name == "backup" || name == "restore") {
@@ -379,12 +388,9 @@ func (o *options) run(c *cobra.Command, name string) error {
 		}
 		return o.output(c, result)
 	case "history":
-		items, err := svc.RestoreHistory(ctx)
+		items, err := svc.RestoreHistory(ctx, limit)
 		if err != nil {
 			return err
-		}
-		if len(items) > limit {
-			items = items[:limit]
 		}
 		return o.output(c, items)
 	case "verify":
@@ -423,36 +429,11 @@ func (o *options) run(c *cobra.Command, name string) error {
 		return o.output(c, items)
 	case "cleanup":
 		if !dry {
-			if err := svc.ResumeDeletes(ctx); err != nil {
-				return err
-			}
+			display.Warning("Cleanup deletes expired backups immediately; no confirmation flag is required.")
 		}
-		display.Step("cleanup.select")
-		items, err := svc.List(ctx, "")
+		candidates, err := svc.Cleanup(ctx, time.Now(), dry)
 		if err != nil {
 			return err
-		}
-		candidates, err := retention.Select(items, cfg.Retention, time.Now())
-		if err != nil {
-			return err
-		}
-		display.Done("cleanup.select")
-		if !dry && len(candidates) > 0 {
-			display.Warning(fmt.Sprintf("Cleanup will delete %d backups immediately; no confirmation flag is required.", len(candidates)))
-			// Verify protected backups as well: cleanup cannot rely on corrupt newest
-			// artifacts as the only recovery point.
-			display.Step("cleanup.verify")
-			if err := svc.VerifyCatalog(ctx, items); err != nil {
-				return err
-			}
-			display.Done("cleanup.verify")
-			display.Step("cleanup.delete")
-			for _, m := range candidates {
-				if err := svc.Delete(ctx, m.Name, true, false); err != nil {
-					return err
-				}
-			}
-			display.Done("cleanup.delete")
 		}
 		return o.output(c, candidates)
 	}

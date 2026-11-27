@@ -22,6 +22,7 @@ import (
 	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/notify"
 	"github.com/sung2708/DBVault/internal/pipeline"
+	"github.com/sung2708/DBVault/internal/retention"
 	"github.com/sung2708/DBVault/internal/storage"
 )
 
@@ -115,13 +116,6 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 		base, e = s.latestBase(ctx)
 		if e != nil {
 			return operation, e
-		}
-		pending, e := storage.DeletePending(ctx, s.Store, base.Name, ".meta.json")
-		if e != nil {
-			return operation, e
-		}
-		if pending {
-			return operation, fmt.Errorf("base backup %s has a pending deletion", base.Name)
 		}
 		if base.Delta != nil && base.Delta.Depth >= 32 {
 			return operation, fmt.Errorf("incremental chain limit reached; create a full backup")
@@ -290,8 +284,14 @@ func (s *Service) BackupWithResult(ctx context.Context, kind string, dry bool) (
 	m.Pipeline.Raw = raw
 	m.Pipeline.Stored = stored
 	m.Checksum.Hash = digest
+	m.RowCounts = s.sourceRowCounts(ctx)
 	s.stage("backup.register", "start")
 	b, err := metadata.Encode(m)
+	if errors.Is(err, metadata.ErrManifestTooLarge) && m.RowCounts != nil {
+		s.log("row counts not recorded", "operation", "backup", "error", err.Error())
+		m.RowCounts = nil
+		b, err = metadata.Encode(m)
+	}
 	if err == nil {
 		err = storage.PublishManifest(ctx, s.Store, key+".meta.json", b)
 	}
@@ -329,6 +329,13 @@ func (s *Service) ReadManifest(ctx context.Context, key string) (metadata.Manife
 	return m, fault.Wrap(fault.Integrity, "validate manifest", err)
 }
 
+func boundedArtifact(r io.Reader, size int64) io.Reader {
+	if size < math.MaxInt64 {
+		size++
+	}
+	return io.LimitReader(r, size)
+}
+
 // snapshot verifies the exact stored bytes into an operator-private temporary
 // file. Restore never reopens a mutable source after verification.
 func (s *Service) snapshot(ctx context.Context, key string) (metadata.Manifest, *os.File, error) {
@@ -353,11 +360,7 @@ func (s *Service) snapshot(ctx context.Context, key string) (metadata.Manifest, 
 		return m, nil, fault.Wrap(fault.Integrity, "verify stored artifact", e)
 	}
 	s.stage("restore.verify", "start")
-	limit := m.Pipeline.Stored
-	if limit < math.MaxInt64 {
-		limit++
-	}
-	digest, n, err := pipeline.Hash(ctx, s.meter(io.LimitReader(r, limit), "restore.verify", m.Pipeline.Stored), f)
+	digest, n, err := pipeline.Hash(ctx, s.meter(boundedArtifact(r, m.Pipeline.Stored), "restore.verify", m.Pipeline.Stored), f)
 	if err != nil {
 		return fail(err)
 	}
@@ -504,6 +507,10 @@ func (s *Service) notifyBackup(ctx context.Context, m metadata.Manifest, err err
 	}
 }
 func (s *Service) List(ctx context.Context, prefix string) ([]metadata.Manifest, error) {
+	return s.list(ctx, prefix, false)
+}
+
+func (s *Service) list(ctx context.Context, prefix string, includeMissing bool) ([]metadata.Manifest, error) {
 	objects, err := s.Store.List(ctx, prefix)
 	if err != nil {
 		return nil, err
@@ -517,6 +524,10 @@ func (s *Service) List(ctx context.Context, prefix string) ([]metadata.Manifest,
 		m, err := s.ReadManifest(ctx, key)
 		if err != nil {
 			return nil, err
+		}
+		if includeMissing {
+			result = append(result, m)
+			continue
 		}
 		exists, err := s.Store.Exists(ctx, key)
 		if err != nil {
@@ -569,7 +580,7 @@ func (s *Service) Delete(ctx context.Context, key string, confirm, dry bool) (re
 		return err
 	}
 	s.emit(Event{Stage: "manifest", State: "complete", Manifest: m})
-	items, err := s.List(ctx, "")
+	items, err := s.list(ctx, "", true)
 	if err != nil {
 		return err
 	}
@@ -592,6 +603,72 @@ func (s *Service) Delete(ctx context.Context, key string, confirm, dry bool) (re
 	return err
 }
 
+func (s *Service) Cleanup(ctx context.Context, now time.Time, dry bool) (_ []metadata.Manifest, resultErr error) {
+	var pending []string
+	if !dry {
+		if err := s.Config.Storage.CheckDelete(); err != nil {
+			return nil, err
+		}
+		release, err := s.chainLock(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer release(&resultErr)
+		pending, err = storage.ResumeUnregisteredDeletes(ctx, s.Store, ".meta.json")
+		if err != nil {
+			return nil, err
+		}
+	}
+	s.stage("cleanup.select", "start")
+	// Registered entries with missing archives still count as dependencies.
+	items, err := s.list(ctx, "", true)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := retention.Select(items, s.Config.Retention, now)
+	if err != nil {
+		return nil, err
+	}
+	s.stage("cleanup.select", "complete")
+	if dry || (len(candidates) == 0 && len(pending) == 0) {
+		return candidates, nil
+	}
+	s.stage("cleanup.verify", "start")
+	quiet := *s
+	quiet.Observe = nil
+	expired := make(map[string]bool, len(candidates))
+	for _, m := range candidates {
+		expired[m.Name] = true
+	}
+	if len(candidates) > 0 {
+		if err := quiet.verifyCatalog(ctx, items, expired); err != nil {
+			return nil, err
+		}
+	}
+	for _, key := range pending {
+		if expired[key] {
+			continue
+		}
+		if len(candidates) == 0 {
+			if err := quiet.VerifyChain(ctx, key); err != nil {
+				return nil, fmt.Errorf("resolve pending deletion for %s: %w", key, err)
+			}
+		}
+		if err := storage.ClearPendingDelete(ctx, s.Store, key, ".meta.json"); err != nil {
+			return nil, fmt.Errorf("clear pending deletion for %s: %w", key, err)
+		}
+	}
+	s.stage("cleanup.verify", "complete")
+	s.stage("cleanup.delete", "start")
+	for _, m := range candidates {
+		if err := storage.DeleteRegistered(ctx, s.Store, m.Name, ".meta.json"); err != nil {
+			return nil, err
+		}
+	}
+	s.stage("cleanup.delete", "complete")
+	return candidates, nil
+}
+
 func (s *Service) ResumeDeletes(ctx context.Context) (resultErr error) {
 	if err := s.Config.Storage.CheckDelete(); err != nil {
 		return err
@@ -602,4 +679,44 @@ func (s *Service) ResumeDeletes(ctx context.Context) (resultErr error) {
 	}
 	defer release(&resultErr)
 	return storage.ResumeDeletes(ctx, s.Store, ".meta.json")
+}
+
+// sourceRowCounts records per-table counts for later drill comparison when
+// protection.record_row_counts is enabled. Selective backups are skipped, since
+// whole-database counts would not describe the archive. A counting failure
+// leaves the already-stored backup without counts and is logged, not fatal.
+func (s *Service) sourceRowCounts(ctx context.Context) *metadata.RowCounts {
+	if s.Config.Protection == nil || !s.Config.Protection.RecordRowCounts {
+		return nil
+	}
+	o := s.Config.Database.Options
+	if len(o.IncludeTables)+len(o.ExcludeTables)+len(o.IncludeCollections)+len(o.ExcludeCollections) > 0 {
+		s.log("row counts not recorded for a selective backup", "operation", "backup")
+		return nil
+	}
+	counter, ok := s.DB.(database.RowCounter)
+	if !ok {
+		return nil
+	}
+	// Reserve time for manifest publication after this optional operation.
+	now := time.Now()
+	countDeadline := now.Add(30 * time.Second)
+	if deadline, ok := ctx.Deadline(); ok && deadline.Add(-10*time.Second).Before(countDeadline) {
+		countDeadline = deadline.Add(-10 * time.Second)
+	}
+	if !countDeadline.After(now) {
+		s.log("row counts not recorded", "operation", "backup", "error", "insufficient time before backup deadline")
+		return nil
+	}
+	countCtx, cancel := context.WithDeadline(ctx, countDeadline)
+	defer cancel()
+	counts, err := counter.CountRows(countCtx)
+	if err != nil {
+		s.log("row counts not recorded", "operation", "backup", "error", err.Error())
+		return nil
+	}
+	// Counts are read after the dump in a separate session. Even MongoDB's
+	// quiesced-write contract covers only the dump itself, so differences are
+	// warnings, including tables created after the dump.
+	return &metadata.RowCounts{Consistency: "separate_transaction", CountedAt: s.now().UTC(), Tables: counts}
 }

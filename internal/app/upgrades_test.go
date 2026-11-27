@@ -152,7 +152,8 @@ func TestIncrementalLockAndDryRun(t *testing.T) {
 	if _, err := s.Backup(ctx, "incremental", false); err == nil {
 		t.Fatal("incremental without base")
 	}
-	if _, err := s.Backup(ctx, "full", false); err != nil {
+	base, err := s.Backup(ctx, "full", false)
+	if err != nil {
 		t.Fatal(err)
 	}
 	before, _ := s.Store.List(ctx, "")
@@ -162,6 +163,16 @@ func TestIncrementalLockAndDryRun(t *testing.T) {
 	after, _ := s.Store.List(ctx, "")
 	if len(after) != len(before) {
 		t.Fatal("dry run wrote")
+	}
+	marker := base.Name + ".meta.json.deleting"
+	if err := s.Store.Put(ctx, marker, strings.NewReader(base.Name), int64(len(base.Name))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Backup(ctx, "incremental", true); err == nil || !strings.Contains(err.Error(), "pending deletion") {
+		t.Fatalf("dry run accepted pending deletion: %v", err)
+	}
+	if err := s.Store.Delete(ctx, marker); err != nil {
+		t.Fatal(err)
 	}
 	release, err := s.chainLock(ctx)
 	if err != nil {
@@ -207,14 +218,43 @@ func TestLogicalCatalogVerificationAndLockRelease(t *testing.T) {
 	if err != nil || len(items) != 2 {
 		t.Fatal(items, err)
 	}
-	if err := s.VerifyCatalog(ctx, items); err != nil {
+	if err := s.verifyCatalog(ctx, items, nil); err != nil {
 		t.Fatal(err)
 	}
 	evidence, err := s.Store.List(ctx, "verification_")
 	if err != nil || len(evidence) != len(items) {
 		t.Fatalf("verification records = %d, error = %v", len(evidence), err)
 	}
-	if err := s.VerifyCatalog(ctx, []metadata.Manifest{increment}); err == nil {
+	if err := s.verifyCatalog(ctx, []metadata.Manifest{increment}, nil); err == nil {
 		t.Fatal("missing base accepted")
+	}
+}
+
+func TestIncrementalScopeAllowsReorderedSelectors(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := setup(t, "none")
+	s.Config.Database.Type = "postgres"
+	s.Config.Database.Options.IncludeTables = []string{"public.orders", "public.items"}
+	base, err := s.Backup(ctx, "full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Config.Database.Options.IncludeTables = []string{"public.items", "public.orders"}
+	if !s.MatchesBackup(base) {
+		t.Fatal("reordered selectors changed the backup scope")
+	}
+	m, err := s.Backup(ctx, "incremental", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Delta == nil || m.Delta.BaseID != base.ID {
+		t.Fatalf("wrong base: %+v", m.Delta)
+	}
+	if err := s.Restore(ctx, m.Name, true, false, database.RestoreOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	s.Config.Database.Options.IncludeTables = []string{"public.items"}
+	if s.MatchesBackup(base) {
+		t.Fatal("different table selection matched")
 	}
 }

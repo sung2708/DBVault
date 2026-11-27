@@ -9,9 +9,22 @@ import (
 	"github.com/sung2708/DBVault/internal/pipeline"
 )
 
-// Chain exposes validated ancestry to storage-only monitors; no source connection.
-func (s *Service) Chain(ctx context.Context, name string) ([]Record, error) {
-	return s.chain(ctx, name)
+// CatalogChain validates ancestry using manifests from ReadCatalog.
+func CatalogChain(ctx context.Context, items []Record, name string) ([]Record, error) {
+	byName := make(map[string]Record, len(items))
+	for _, m := range items {
+		byName[m.Name] = m
+	}
+	return walkChain(ctx, name, func(ctx context.Context, key string) (Record, error) {
+		if err := ctx.Err(); err != nil {
+			return Record{}, err
+		}
+		m, ok := byName[key]
+		if !ok {
+			return Record{}, fmt.Errorf("PITR manifest %s missing from catalog", key)
+		}
+		return m, nil
+	})
 }
 
 // VerifyStored checks ciphertext/clear stored bytes without needing a decryption

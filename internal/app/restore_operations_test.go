@@ -104,7 +104,7 @@ func TestRestoreOperationsSafetyAndEvidence(t *testing.T) {
 				}
 				return
 			}
-			history, e := s.RestoreHistory(context.Background())
+			history, e := s.RestoreHistory(context.Background(), 0)
 			if e != nil || len(history) != 1 || history[0].Backup.ID != m.ID || history[0].Database != "fixture" {
 				t.Fatal(history, e)
 			}
@@ -147,7 +147,7 @@ func TestNewRestoreNeverCreatesOnDryRunCorruptionOrExisting(t *testing.T) {
 				t.Fatal("missing failure")
 			}
 			if scenario == "dry" {
-				history, e := s.RestoreHistory(context.Background())
+				history, e := s.RestoreHistory(context.Background(), 0)
 				if e != nil || len(history) != 0 {
 					t.Fatal(history, e)
 				}
@@ -235,5 +235,64 @@ func TestExportRemovesPartialOutputOnRawSizeMismatch(t *testing.T) {
 	}
 	if _, e = os.Stat(path); !os.IsNotExist(e) {
 		t.Fatal("partial output left behind", e)
+	}
+}
+
+func TestRestoreHistoryOmitsCountsFromOversizedRecord(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := setup(t, "none")
+	m, err := s.Backup(ctx, "full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.RowCounts = &metadata.RowCounts{
+		Consistency: "separate_transaction", CountedAt: m.CompletedAt, Tables: map[string]int64{"x": 1},
+	}
+	encoded, err := metadata.Encode(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.RowCounts.Tables = map[string]int64{strings.Repeat("x", maxRestoreHistoryBytes-len(encoded)-100): 1}
+	encoded, err = metadata.Encode(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := m.Name + ".meta.json"
+	if err := s.Store.Delete(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Store.Put(ctx, key, bytes.NewReader(encoded), int64(len(encoded))); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.RestoreWithResult(ctx, m.Name, true, false, RestoreRequest{})
+	if err != nil || result.Status != "completed" || result.EvidenceStatus != "recorded" || result.Backup.RowCounts == nil {
+		t.Fatalf("restore status=%s evidence=%s err=%v", result.Status, result.EvidenceStatus, err)
+	}
+	history, err := s.RestoreHistory(ctx, 0)
+	if err != nil || len(history) != 1 || history[0].Backup.ID != m.ID || history[0].Backup.RowCounts != nil {
+		t.Fatalf("history records=%d err=%v", len(history), err)
+	}
+}
+
+func TestRestoreHistoryLimitReadsOnlyThroughCutoffSecond(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := setup(t, "none")
+	m, err := s.Backup(ctx, "full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, millis := range []int{100, 200} {
+		s.Now = func() time.Time { return healthNow.Add(time.Duration(millis) * time.Millisecond) }
+		if _, err := s.RestoreWithResult(ctx, m.Name, true, false, RestoreRequest{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldKey := "restore_history_" + healthNow.Add(-time.Hour).Format("20060102_150405") + "_old.json"
+	if err := s.Store.Put(ctx, oldKey, strings.NewReader("{}"), 2); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.RestoreHistory(ctx, 1)
+	if err != nil || len(got) != 1 || !got[0].StartedAt.Equal(s.now()) {
+		t.Fatalf("history=%+v error=%v", got, err)
 	}
 }

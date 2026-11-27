@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/sung2708/DBVault/internal/app"
 	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/database/sqlite"
+	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/storage/local"
 )
 
@@ -76,5 +78,46 @@ func TestSQLiteRecoveryDrill(t *testing.T) {
 				t.Fatal("cleanup failed", err)
 			}
 		})
+	}
+}
+
+func TestRecoveryDrillWithoutRowEvidenceIgnoresCountLimit(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.sqlite")
+	db, err := sql.Open("sqlite", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	for i := range metadata.MaxRowCountTables + 1 {
+		if _, err := tx.Exec(fmt.Sprintf("CREATE TABLE t%d(id INTEGER)", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.Version = "1"
+	cfg.Database = config.Database{Type: "sqlite", Database: source}
+	store, err := local.New(filepath.Join(dir, "backups"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := &app.Service{Config: cfg, DB: &sqlite.Adapter{Config: cfg.Database}, Store: store}
+	ctx := context.Background()
+	m, err := s.Backup(ctx, "full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.RecoveryDrill(ctx, app.DrillOptions{Target: m.Name, RecoveryDatabase: filepath.Join(dir, "large-schema.sqlite"), Confirm: true})
+	if err != nil || r.Status != "passed" || r.Validation == nil || r.Validation.Rows != nil {
+		t.Fatalf("drill status=%s validation=%+v err=%v", r.Status, r.Validation, err)
 	}
 }

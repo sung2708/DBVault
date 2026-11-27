@@ -46,7 +46,14 @@ func stageLabel(stage string, complete bool) string {
 func (r *Renderer) animation() bool {
 	return !r.options.DisableAnimation && !r.options.Quiet && !r.options.JSON && r.outCaps.TTY && r.errCaps.TTY && r.outCaps.Color && r.errCaps.Color
 }
+
+// clearLocked ends the transient display: the stderr line and any terminal
+// tab/taskbar progress.
 func (r *Renderer) clearLocked() {
+	r.clearTerminalProgressLocked()
+	r.clearLineLocked()
+}
+func (r *Renderer) clearLineLocked() {
 	if r.visible {
 		fmt.Fprint(r.err, "\r\x1b[2K")
 		r.visible = false
@@ -191,8 +198,9 @@ func (r *Renderer) tick(now time.Time) {
 	if !r.animation() || !r.active || now.Sub(r.stageStart) < 200*time.Millisecond {
 		return
 	}
-	r.clearLocked()
+	r.clearLineLocked()
 	fmt.Fprint(r.err, "\r"+r.errStyle.accent.Render(r.progressLine()))
 	r.visible = true
+	r.updateTerminalProgressLocked(now)
 	r.frame++
 }

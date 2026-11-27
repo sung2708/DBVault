@@ -49,8 +49,8 @@ func (o *options) metricsCommand() *cobra.Command {
 			}
 			defer listener.Close()
 			type snapshot struct {
-				text string
-				at   time.Time
+				metrics app.MetricsSnapshot
+				at      time.Time
 			}
 			var cached atomic.Pointer[snapshot]
 			refreshCtx, stopRefresh := context.WithCancel(c.Context())
@@ -64,9 +64,9 @@ func (o *options) metricsCommand() *cobra.Command {
 				// shortcut: refresh still scans retained history, aggregate records if refresh latency grows too large.
 				for refreshCtx.Err() == nil {
 					started := time.Now()
-					text, err := svc.Metrics(refreshCtx)
+					metrics, err := svc.ReadMetrics(refreshCtx)
 					if err == nil {
-						cached.Store(&snapshot{text: text, at: started})
+						cached.Store(&snapshot{metrics: metrics, at: started})
 					}
 					select {
 					case <-refreshCtx.Done():
@@ -87,7 +87,7 @@ func (o *options) metricsCommand() *cobra.Command {
 					return
 				}
 				w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-				fmt.Fprint(w, current.text)
+				fmt.Fprint(w, current.metrics.Text(time.Now()))
 				fmt.Fprint(w, "# HELP dbvault_metrics_snapshot_age_seconds Age of the last successful metrics snapshot.\n# TYPE dbvault_metrics_snapshot_age_seconds gauge\n")
 				fmt.Fprintf(w, "dbvault_metrics_snapshot_age_seconds %g\n", time.Since(current.at).Seconds())
 			})

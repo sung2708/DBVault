@@ -14,7 +14,9 @@ import (
 
 type serverDocker struct {
 	drillDocker
-	engine string
+	engine       string
+	checks       []string
+	countQueries int
 }
 
 func (d *serverDocker) Run(ctx context.Context, s runner.Spec) error {
@@ -48,20 +50,27 @@ func (d *serverDocker) Run(ctx context.Context, s runner.Spec) error {
 			return errors.New("validation failed")
 		}
 		if d.engine == "mysql" {
-			out = "recovered.fixture\tcheck\tstatus\tOK\n1"
+			d.checks = append(d.checks, joined)
+			out = "recovered.fixture\tcheck\tstatus\tOK"
 		} else {
-			out = "DBVAULT_COUNT=1"
+			out = "DBVAULT_ROWS={\"fixture\":1}\nDBVAULT_COUNT=1"
 		}
 	case strings.Contains(joined, "SELECT table_name"):
 		out = "fixture"
 	case s.Stdin != nil:
-		if _, err := io.Copy(io.Discard, s.Stdin); err != nil {
+		input, err := io.ReadAll(s.Stdin)
+		if err != nil {
 			return err
 		}
-		if d.failure == "restore" {
+		switch {
+		case strings.HasPrefix(string(input), "SELECT HEX(table_name)"):
+			out = "66697874757265"
+		case strings.HasPrefix(string(input), "SELECT '66697874757265', COUNT(*)"):
+			d.countQueries++
+			out = "66697874757265\t1"
+		case d.failure == "restore":
 			return errors.New("restore failed")
-		}
-		if d.failure == "cancel" {
+		case d.failure == "cancel":
 			return context.Canceled
 		}
 	}
@@ -80,6 +89,7 @@ func serverDrillFixture(t *testing.T, engine string, corrupt bool) (*Service, me
 		m.Database.Format = "sql"
 		m.Database.Version = "8.4.0"
 		m.ToolVersion = "mysqldump Ver 8.4.0"
+		m.RowCounts = &metadata.RowCounts{Consistency: "separate_transaction", CountedAt: m.CompletedAt, Tables: map[string]int64{"fixture": 1}}
 	} else {
 		m.Database.Format = "archive"
 		m.Database.Version = "8.0.0"
@@ -110,6 +120,9 @@ func TestServerDrillFailureEvidenceAndPreservation(t *testing.T) {
 					want = "passed"
 					if err != nil || r.TargetState != "removed" {
 						t.Fatal(r, err)
+					}
+					if engine == "mysql" && (len(d.checks) != 1 || strings.Contains(d.checks[0], "COUNT(*)") || d.countQueries != 1 || r.Validation.Rows["fixture"] != 1) {
+						t.Fatalf("checks=%v row count queries=%d validation=%+v", d.checks, d.countQueries, r.Validation)
 					}
 				} else {
 					if failure == "cancel" {

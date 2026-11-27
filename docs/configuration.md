@@ -2,8 +2,8 @@
 
 For native WAL/binlog/oplog configuration, scheduled baseline refresh and
 whole-chain retention, see [native PITR](pitr.md). Native cleanup uses the same
-`retention.keep_days` and `keep_count` settings; its count is independent baseline
-chains, while logical cleanup counts logical backups.
+`retention` settings, including the calendar rules; it counts independent
+baseline chains, while logical cleanup counts logical backups.
 
 For client-side encryption, logical incremental chains, all-engine isolated
 recovery drills, metrics and recurring recovery jobs, see [operator instructions](enhancements.md).
@@ -52,8 +52,18 @@ engine-specific and CLI values override the environment only when supplied.
 No general `${ENV}` YAML interpolation is performed; secrets use `password_env`.
 
 `compression.level` accepts 1–9 for gzip/zstd, and is ignored for `none`.
-For retention, both policies protect backups by union, per engine/database;
-the newest valid backup is always protected and age-boundary backups are kept.
+For retention, every policy protects backups by union, per engine/database;
+the newest valid backup and the newest backup covering the whole database are
+always protected. Age-boundary backups are kept.
+The calendar (grandfather-father-son) rules `keep_daily`, `keep_weekly`,
+`keep_monthly` and `keep_yearly` keep the newest backup in each of the last N
+UTC days, ISO weeks, calendar months and years that contain a backup. Periods
+without a backup do not use up the count. Incremental ancestors of every kept
+backup stay protected. For example, `keep_daily: 7`, `keep_weekly: 4` and
+`keep_monthly: 12` select at most 23 restore points per database across a year, plus any
+whole-database backup protected separately.
+Native PITR cleanup applies the same rules to whole chains, dated by each
+chain's newest recoverable point.
 See [ADR-0007](adr/0007-verified-local-foundation.md).
 
 MongoDB adds `database.auth_database` (defaults to `admin`),
@@ -91,7 +101,9 @@ Optional `health.max_backup_age` is a positive Go duration, such as `30m`, `12h`
 rejected. Omitted/empty means no freshness expectation: health reports unknown
 unless concrete missing/corrupt backup evidence already makes it critical.
 The policy applies to the single configured database and has no environment or
-CLI override. Cron and retention settings do not supply an implicit policy.
+CLI override. Logical health matches the configured table or collection
+selectors. With empty selectors, it checks whole-database backups. Cron and
+retention settings do not supply an implicit policy.
 See [health](cli-reference.md#dbvault-health) for exact boundaries and exit codes.
 
 `health.backup_scope` defaults to `logical`; `pitr` selects instance-wide native
@@ -116,6 +128,25 @@ or verification fails, DBVault returns failure while preserving the registered
 artifact and reports the verification outcome. The default is disabled. For S3,
 GCS and Azure, this reads the entire object after upload, adding time, read/API
 charges and potentially egress; enable it only when that tradeoff is intended.
+
+### Row count evidence
+
+```yaml
+protection:
+  record_row_counts: true
+```
+
+When enabled, each full and incremental backup records per-table row counts of
+the source (per collection for MongoDB) in its manifest. Recovery drills count
+the restored copy and report mismatches, including missing tables, as warnings.
+Counts are taken in a separate session after the dump, so changes to data or
+schema can explain mismatches. Counting has a 30-second budget, shortened for
+scheduled jobs near their deadline. When counting fails or the counts would make
+the manifest exceed 1 MiB, the backup is registered without counts. Selective
+backups (table or collection filters) record no counts.
+Counting runs `count(*)` on every table, which reads each table once more.
+Manifests with row counts require this DBVault release or newer to read; drill
+records keep their previous format unless the backup has counts.
 
 DBVault resolves configuration values using the following strict hierarchy (highest priority first):
 
@@ -166,6 +197,10 @@ compression:
 retention:
   keep_days: 30               # integer, optional, default: 0 (disabled)
   keep_count: 14              # integer, optional, default: 0 (disabled)
+  keep_daily: 7               # integer, optional, default: 0 (disabled)
+  keep_weekly: 4              # integer, optional, default: 0 (disabled)
+  keep_monthly: 12            # integer, optional, default: 0 (disabled)
+  keep_yearly: 3              # integer, optional, default: 0 (disabled)
 
 notifications:
   slack:
@@ -214,6 +249,8 @@ notifications:
 | `storage.s3.region` | string | Conditional | None | — | AWS region. |
 | `storage.s3.prefix` | string | No | `""` | — | Normalized object prefix. |
 | `storage.s3.protect_deletes` | bool | No | `false` | — | Refuse backup object and manifest deletion while allowing internal operation locks to be released. |
+| `storage.s3.object_lock.mode` | string | No | None | — | Per-object Object Lock retention for every backup object and manifest: `GOVERNANCE` or `COMPLIANCE`. Requires an Object Lock bucket and `protect_deletes: true`. |
+| `storage.s3.object_lock.days` | integer | Conditional | None | — | Retention length in days (1–36500) from each object's upload. |
 | `storage.s3.endpoint` | string | No | `""` | — | Explicit S3-compatible endpoint. |
 
 ---
@@ -233,6 +270,10 @@ notifications:
 |---|---|---|---|---|
 | `retention.keep_days` | integer | No | `0` | Delete backups older than this number of days (0 = disabled). |
 | `retention.keep_count` | integer | No | `0` | Retain only the most recent N backups (0 = disabled). |
+| `retention.keep_daily` | integer | No | `0` | Keep the newest backup of each of the last N UTC days with a backup (0 = disabled). |
+| `retention.keep_weekly` | integer | No | `0` | Keep the newest backup of each of the last N ISO weeks with a backup (0 = disabled). |
+| `retention.keep_monthly` | integer | No | `0` | Keep the newest backup of each of the last N months with a backup (0 = disabled). |
+| `retention.keep_yearly` | integer | No | `0` | Keep the newest backup of each of the last N years with a backup (0 = disabled). |
 
 ---
 

@@ -137,9 +137,37 @@ digest calculated during upload.
 
 ### S3 Object Lock
 
-Configure default retention on a dedicated Object Lock bucket, and set
-`storage.s3.protect_deletes: true` in every DBVault config using the protected
-prefix. This blocks deletion of backup objects and their manifests, including
+Use a dedicated bucket created with Object Lock enabled. Either configure
+default retention on the bucket, or let DBVault request retention per object:
+
+```yaml
+storage:
+  type: s3
+  s3:
+    bucket: dbvault-locked
+    region: eu-west-1
+    protect_deletes: true
+    object_lock:
+      mode: COMPLIANCE    # or GOVERNANCE
+      days: 35
+```
+
+With `object_lock`, every backup archive, manifest and evidence record DBVault
+writes gets that mode and a retain-until date `days` after its upload, sent
+with a CRC32 checksum as S3 requires. DBVault's own `dbvault_chain.lock` and
+`dbvault_pitr.lock` objects receive no explicit retention from DBVault. They
+inherit bucket-wide default retention if enabled. Use per-object retention
+with no bucket default to keep these versions exempt. Releasing either lock
+adds a delete marker on versioned S3 buckets, so later jobs can acquire the
+same key while retained versions remain stored. A bucket without Object Lock
+rejects these uploads, so the first backup fails rather than storing unlocked
+objects. COMPLIANCE retention cannot be shortened or removed by anyone,
+including the root account, until it expires; test with GOVERNANCE first.
+Choose `days` no shorter than the retention policy you rely on, since cleanup
+cannot remove a locked version early.
+
+Set `storage.s3.protect_deletes: true` in every DBVault config using the
+protected prefix; `object_lock` requires it. This blocks deletion of backup objects and their manifests, including
 cleanup and rollback deletes. Omit `--cleanup` from protected native backup
 schedules. Standalone cleanup supports `--dry-run` for previews. An interrupted
 publication can therefore leave

@@ -9,15 +9,16 @@ import (
 	"time"
 )
 
-// Select applies both keep policies as protections (union). The newest valid
-// backup of each engine/database is always protected. Disabled policies add no
-// protection; with both disabled, no deletion occurs.
+// Select applies every keep policy as a protection (union): age, count and
+// the calendar (GFS) rules. The newest valid backup of each engine/database is
+// always protected. Disabled policies add no protection; with all of them
+// disabled, no deletion occurs.
 func Select(backups []metadata.Manifest, p config.Retention, now time.Time) ([]metadata.Manifest, error) {
-	if p.KeepDays < 0 || p.KeepCount < 0 {
+	if p.Negative() {
 		return nil, fmt.Errorf("retention values must be nonnegative")
 	}
 	result := []metadata.Manifest{}
-	if p.KeepDays == 0 && p.KeepCount == 0 {
+	if !p.Enabled() {
 		return result, nil
 	}
 	groups := map[string][]metadata.Manifest{}
@@ -36,8 +37,18 @@ func Select(backups []metadata.Manifest, p config.Retention, now time.Time) ([]m
 			return items[i].CreatedAt.After(items[j].CreatedAt)
 		})
 		cutoff := now.UTC().AddDate(0, 0, -p.KeepDays)
+		dated := make([]Dated, len(items))
 		for i, m := range items {
-			if i == 0 || i < p.KeepCount || (p.KeepDays > 0 && !m.CreatedAt.Before(cutoff)) {
+			dated[i] = Dated{Name: m.Name, At: m.CreatedAt}
+		}
+		calendar := Calendar(dated, p)
+		protectedWhole := false
+		for i, m := range items {
+			if !protectedWhole && !m.Database.Selective() {
+				protectedWhole = true
+				continue
+			}
+			if i == 0 || i < p.KeepCount || (p.KeepDays > 0 && !m.CreatedAt.Before(cutoff)) || calendar[m.Name] {
 				continue
 			}
 			result = append(result, m)

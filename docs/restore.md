@@ -35,7 +35,8 @@ existing confirmation contract. See [CLI semantics](cli-reference.md#dbvault-rec
 
 All adapters verify the exact compressed snapshot before writes. MySQL restores
 SQL through `mysql`; MongoDB restores native archives, supports `--collection`
-and namespace remapping, and requires matching server major/tools. Their restores
+and namespace remapping, and requires the source server major and Database Tools
+100.MINOR series (same or newer patch). Their restores
 are not atomic as a whole. SQLite validates a second decompressed image and uses
 its online backup API against an existing destination; temporary space must hold
 both the compressed snapshot and SQLite image. The destination's entire contents

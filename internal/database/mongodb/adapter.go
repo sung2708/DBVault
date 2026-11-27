@@ -16,6 +16,7 @@ import (
 	"github.com/sung2708/DBVault/internal/database"
 	runner "github.com/sung2708/DBVault/internal/exec"
 	"github.com/sung2708/DBVault/internal/fault"
+	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/toolresolve"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -29,6 +30,8 @@ type Adapter struct {
 	Password string
 	Runner   runner.Runner
 	Probe    func(context.Context) (string, error)
+	// Counter replaces CountRows in tests.
+	Counter func(context.Context) (map[string]int64, error)
 }
 
 func (*Adapter) Name() string      { return "mongodb" }
@@ -37,6 +40,64 @@ func (*Adapter) Extension() string { return ".archive" }
 func (*Adapter) Capabilities() database.Capabilities {
 	return database.Capabilities{ConnectionTest: true, FullBackup: true, FullRestore: true, SelectiveBackup: true, SelectiveRestore: true, StreamingBackup: true}
 }
+func (a *Adapter) connect(ctx context.Context, auth string) (*mongo.Client, func(), error) {
+	opts := options.Client().SetHosts([]string{net.JoinHostPort(a.Config.Host, strconv.Itoa(a.Config.Port))}).SetAuth(options.Credential{Username: a.Config.User, Password: a.Password, AuthSource: auth}).SetServerSelectionTimeout(10 * time.Second).SetConnectTimeout(10 * time.Second)
+	if a.Config.SSLMode == "require" || a.Config.SSLMode == "verify-full" {
+		opts.SetTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
+	}
+	client, err := mongo.Connect(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	disconnect := func() {
+		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		client.Disconnect(c)
+	}
+	if err = client.Ping(ctx, readpref.Primary()); err != nil {
+		disconnect()
+		return nil, nil, err
+	}
+	return client, disconnect, nil
+}
+
+// CountRows counts documents per collection in a session separate from
+// mongodump, so writes outside the quiesced dump can change the counts.
+func (a *Adapter) CountRows(ctx context.Context) (map[string]int64, error) {
+	if a.Counter != nil {
+		return a.Counter(ctx)
+	}
+	auth := a.Config.AuthDatabase
+	if auth == "" {
+		auth = "admin"
+	}
+	client, disconnect, err := a.connect(ctx, auth)
+	if err != nil {
+		return nil, err
+	}
+	defer disconnect()
+	db := client.Database(a.Config.Database)
+	names, err := db.ListCollectionNames(ctx, bson.D{{Key: "type", Value: "collection"}})
+	if err != nil {
+		return nil, err
+	}
+	if len(names) > metadata.MaxRowCountTables {
+		return nil, fmt.Errorf("too many collections to record document counts")
+	}
+	counts := map[string]int64{}
+	for _, name := range names {
+		if strings.HasPrefix(name, "system.") {
+			continue
+		}
+		n, err := db.Collection(name).CountDocuments(ctx, bson.D{})
+		if err != nil {
+			return nil, err
+		}
+		counts[name] = n
+	}
+	return counts, nil
+}
+
 func (a *Adapter) probe(ctx context.Context) (string, error) {
 	if a.Probe != nil {
 		return a.Probe(ctx)
@@ -45,22 +106,11 @@ func (a *Adapter) probe(ctx context.Context) (string, error) {
 	if auth == "" {
 		auth = "admin"
 	}
-	opts := options.Client().SetHosts([]string{net.JoinHostPort(a.Config.Host, strconv.Itoa(a.Config.Port))}).SetAuth(options.Credential{Username: a.Config.User, Password: a.Password, AuthSource: auth}).SetServerSelectionTimeout(10 * time.Second).SetConnectTimeout(10 * time.Second)
-	if a.Config.SSLMode == "require" || a.Config.SSLMode == "verify-full" {
-		opts.SetTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
-	}
-	client, err := mongo.Connect(opts)
+	client, disconnect, err := a.connect(ctx, auth)
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		client.Disconnect(c)
-	}()
-	if err = client.Ping(ctx, readpref.Primary()); err != nil {
-		return "", err
-	}
+	defer disconnect()
 	var build struct {
 		Version string `bson:"version"`
 	}
@@ -217,8 +267,30 @@ func (a *Adapter) Compatible(target database.Info, server, tool string) error {
 	if src == "" || src != dst {
 		return fmt.Errorf("MongoDB restore requires the same server major version")
 	}
-	if tool != target.RestoreToolVersion {
-		return fmt.Errorf("mongorestore must match the source tools version")
+	if !restoreToolCompatible(tool, target.RestoreToolVersion) {
+		return fmt.Errorf("mongorestore must use the source Database Tools 100.MINOR series at the same or a newer patch (source %s, restore %s)", tool, target.RestoreToolVersion)
 	}
 	return nil
+}
+
+// restoreToolCompatible accepts the source tools release or a later patch of
+// the same 100.MINOR series. Patch releases keep the archive format, so a
+// security-patched mongorestore can still restore earlier backups of that series.
+func restoreToolCompatible(source, restore string) bool {
+	parse := func(v string) (minor, patch int, ok bool) {
+		m := toolVersion.FindStringSubmatch(v)
+		if len(m) != 2 {
+			return 0, 0, false
+		}
+		parts := strings.Split(m[1], ".")
+		minor, errMinor := strconv.Atoi(parts[1])
+		patch, errPatch := strconv.Atoi(parts[2])
+		return minor, patch, errMinor == nil && errPatch == nil
+	}
+	sm, sp, ok := parse(source)
+	if !ok {
+		return false
+	}
+	rm, rp, ok := parse(restore)
+	return ok && rm == sm && rp >= sp
 }

@@ -362,17 +362,20 @@ Linux amd64 and arm64.
 
 ### Packaged client compatibility
 
-`bash scripts/test-container-clients.sh postgres IMAGE` restores an upstream
-PostgreSQL 16 custom archive with the packaged client, restores a packaged-client
+`bash scripts/test-container-clients.sh postgres IMAGE [MAJOR]` starts a
+PostgreSQL MAJOR server (default 16, matching the image's client) and restores an
+upstream custom archive with the packaged client, restores a packaged-client
 archive with the upstream client, compares the data and runs a streaming-WAL
 `pg_basebackup`. The database server runs in a temporary container.
 
 `bash scripts/test-container-clients.sh mongodb IMAGE` restores an upstream
 MongoDB Database Tools archive with the packaged tools, then restores their
 archive with upstream tools and checks a Unicode record. This checks the
-same-source 100.20.0 rebuild against existing archives. The script cleans up
+100.20.1 rebuild against upstream archives. The script cleans up
 its own server container and anonymous volumes on exit.
 
-The container CI matrix runs both checks on Linux amd64 and arm64. Smoke
+The container CI matrix runs both checks on Linux amd64 and arm64, with one
+PostgreSQL image per major (16, 17 and 18) and a check that each image's
+clients report that major. Smoke
 checks also verify UID/GID 999, required native executables, removal of
 unused server tools, and minimum patched runtime library versions.

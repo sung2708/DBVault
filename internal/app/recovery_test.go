@@ -226,11 +226,11 @@ func (a *failingRecovery) Restore(ctx context.Context, r io.Reader, o database.R
 	}
 	return a.Adapter.Restore(ctx, r, o)
 }
-func (a *failingRecovery) ValidateRecovery(ctx context.Context) (database.RecoveryValidation, error) {
+func (a *failingRecovery) ValidateRecovery(ctx context.Context, countRows bool) (database.RecoveryValidation, error) {
 	if a.validationErr != nil {
 		return database.RecoveryValidation{}, a.validationErr
 	}
-	return a.Adapter.ValidateRecovery(ctx)
+	return a.Adapter.ValidateRecovery(ctx, countRows)
 }
 
 func TestRecoveryFailureStates(t *testing.T) {
@@ -349,5 +349,133 @@ func TestRecoveryUnsupportedAndEvidenceValidation(t *testing.T) {
 		if _, err := DecodeDrill(strings.NewReader(data)); err == nil {
 			t.Fatal("invalid evidence accepted")
 		}
+	}
+}
+
+func TestRecoveryDrillComparesRecordedRowCounts(t *testing.T) {
+	s, m, dir := recoveryFixture(t, "gzip")
+	if m.RowCounts != nil {
+		t.Fatal("row counts recorded without opting in")
+	}
+	r, err := s.RecoveryDrill(context.Background(), DrillOptions{Target: m.Name, RecoveryDatabase: filepath.Join(dir, "plain.sqlite"), Confirm: true})
+	if err != nil || r.Validation.Rows != nil || r.Validation.RowCheck != nil {
+		t.Fatalf("default drill evidence changed: %+v %v", r.Validation, err)
+	}
+
+	db, err := sql.Open("sqlite", s.Config.Database.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("CREATE TABLE sqliteX_orders (id INTEGER); INSERT INTO sqliteX_orders VALUES (1)"); err != nil {
+		t.Fatal(err)
+	}
+	s.Config.Protection = &config.Protection{RecordRowCounts: true}
+	s.Now = func() time.Time { return healthNow.Add(2 * time.Hour) }
+	counted, err := s.Backup(context.Background(), "full", false)
+	if err != nil || counted.RowCounts == nil || counted.RowCounts.Tables["records"] != 3 || counted.RowCounts.Tables["sqliteX_orders"] != 1 || counted.RowCounts.Consistency != "separate_transaction" {
+		t.Fatalf("source counts not recorded: %+v %v", counted.RowCounts, err)
+	}
+	stored, err := s.ReadManifest(context.Background(), counted.Name)
+	if err != nil || stored.RowCounts == nil || stored.RowCounts.Tables["records"] != 3 {
+		t.Fatalf("counts not persisted: %+v %v", stored.RowCounts, err)
+	}
+	r, err = s.RecoveryDrill(context.Background(), DrillOptions{Target: counted.Name, RecoveryDatabase: filepath.Join(dir, "counted.sqlite"), Confirm: true})
+	if err != nil || r.Status != "passed" || r.Validation.RowCheck == nil || r.Validation.RowCheck.Matched != 2 || r.Validation.Rows["records"] != 3 || r.Validation.Rows["sqliteX_orders"] != 1 {
+		t.Fatalf("row check missing: %+v %v", r.Validation, err)
+	}
+	reader, err := s.Store.Get(context.Background(), r.RecordKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := DecodeDrill(reader)
+	reader.Close()
+	if err != nil || evidence.Validation.RowCheck == nil || evidence.Validation.RowCheck.Matched != 2 {
+		t.Fatalf("row check not in evidence: %+v %v", evidence.Validation, err)
+	}
+}
+
+func TestCheckRowsMissingTableWarnsForSeparateCounts(t *testing.T) {
+	v := &database.RecoveryValidation{Rows: map[string]int64{"a": 1}}
+	err := checkRows(v, &metadata.RowCounts{Consistency: "separate_transaction", Tables: map[string]int64{"a": 2, "b": 1}})
+	if err != nil || v.RowCheck == nil || len(v.RowCheck.Missing) != 1 || len(v.RowCheck.Differences) != 1 {
+		t.Fatalf("%+v %v", v.RowCheck, err)
+	}
+}
+
+type rowCountAdapter struct {
+	database.Adapter
+	count func(context.Context) (map[string]int64, error)
+}
+
+func (a rowCountAdapter) CountRows(ctx context.Context) (map[string]int64, error) {
+	return a.count(ctx)
+}
+
+func TestBackupRegistersWhenOptionalCountsAreOmitted(t *testing.T) {
+	for _, reason := range []string{"oversize", "count timeout", "short deadline"} {
+		t.Run(reason, func(t *testing.T) {
+			s, _, _ := recoveryFixture(t, "none")
+			s.Config.Protection = &config.Protection{RecordRowCounts: true}
+			timeout := 15 * time.Second
+			if reason == "short deadline" {
+				timeout = 5 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			called := false
+			s.DB = rowCountAdapter{s.DB, func(countCtx context.Context) (map[string]int64, error) {
+				called = true
+				if reason == "oversize" {
+					return map[string]int64{strings.Repeat("x", 1<<20): 1}, nil
+				}
+				deadline, ok := countCtx.Deadline()
+				parentDeadline, _ := ctx.Deadline()
+				if !ok || deadline.After(parentDeadline.Add(-10*time.Second)) || time.Until(deadline) > 30*time.Second {
+					t.Errorf("count deadline %v does not reserve publication time before %v", deadline, parentDeadline)
+				}
+				return nil, context.DeadlineExceeded
+			}}
+			m, err := s.Backup(ctx, "full", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := s.ReadManifest(ctx, m.Name)
+			if err != nil || m.RowCounts != nil || stored.RowCounts != nil || called != (reason != "short deadline") {
+				t.Fatalf("backup %q: returned counts=%t, stored counts=%t, called=%t, err=%v", m.Name, m.RowCounts != nil, stored.RowCounts != nil, called, err)
+			}
+		})
+	}
+}
+
+func TestOversizedDrillEvidenceKeepsBoundedMismatchDetails(t *testing.T) {
+	ctx := context.Background()
+	s, m, dir := recoveryFixture(t, "none")
+	r, err := s.RecoveryDrill(ctx, DrillOptions{Target: m.Name, RecoveryDatabase: filepath.Join(dir, "target.sqlite"), Confirm: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Validation.Rows = make(map[string]int64)
+	r.Validation.RowCheck = &database.RowCheck{Consistency: "separate_transaction", Tables: 200}
+	for i := range 200 {
+		name := strings.Repeat("x", 3000) + time.Unix(int64(i), 0).Format(time.RFC3339)
+		r.Validation.Rows[name] = 0
+		r.Validation.RowCheck.Differences = append(r.Validation.RowCheck.Differences, database.RowDifference{Table: name, Source: 1})
+	}
+	if err := s.recordDrill(ctx, &r, nil); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := s.Store.Get(ctx, r.RecordKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	stored, err := DecodeDrill(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := stored.Validation.RowCheck
+	if stored.Status != "passed" || check.Tables != 200 || check.OmittedDetails != 195 || len(check.Differences) != 5 || len(r.Validation.Rows) != 200 {
+		t.Fatalf("unexpected recovery evidence: status=%s check=%+v", stored.Status, check)
 	}
 }

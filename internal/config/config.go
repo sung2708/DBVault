@@ -63,6 +63,15 @@ type S3 struct {
 	SecretKeyEnv   string `yaml:"secret_key_env"`
 	Encryption     string `yaml:"encryption"`
 	KMSKeyID       string `yaml:"kms_key_id"`
+	// ObjectLock sets per-object retention on every backup object and manifest
+	// DBVault writes. The bucket must have Object Lock enabled.
+	ObjectLock *S3ObjectLock `yaml:"object_lock,omitempty"`
+}
+
+// S3ObjectLock is the retention DBVault requests for each new object.
+type S3ObjectLock struct {
+	Mode string `yaml:"mode"`
+	Days int    `yaml:"days"`
 }
 type GCS struct {
 	Bucket             string `yaml:"bucket"`
@@ -84,7 +93,25 @@ type Compression struct {
 type Retention struct {
 	KeepDays  int `yaml:"keep_days"`
 	KeepCount int `yaml:"keep_count"`
+	// Grandfather-father-son rules: keep the newest backup of each of the last
+	// N UTC days, ISO weeks, months and years that contain a backup.
+	KeepDaily   int `yaml:"keep_daily,omitempty"`
+	KeepWeekly  int `yaml:"keep_weekly,omitempty"`
+	KeepMonthly int `yaml:"keep_monthly,omitempty"`
+	KeepYearly  int `yaml:"keep_yearly,omitempty"`
 }
+
+// Enabled reports whether any rule protects backups. With every rule at zero,
+// cleanup deletes nothing.
+func (r Retention) Enabled() bool {
+	return r.KeepDays > 0 || r.KeepCount > 0 || r.KeepDaily > 0 || r.KeepWeekly > 0 || r.KeepMonthly > 0 || r.KeepYearly > 0
+}
+
+// Negative reports whether any rule is negative.
+func (r Retention) Negative() bool {
+	return r.KeepDays < 0 || r.KeepCount < 0 || r.KeepDaily < 0 || r.KeepWeekly < 0 || r.KeepMonthly < 0 || r.KeepYearly < 0
+}
+
 type Health struct {
 	MaxBackupAge   string `yaml:"max_backup_age,omitempty"`
 	BackupScope    string `yaml:"backup_scope,omitempty"`
@@ -92,6 +119,9 @@ type Health struct {
 }
 type Protection struct {
 	VerifyAfterBackup bool `yaml:"verify_after_backup,omitempty"`
+	// RecordRowCounts stores per-table source row counts in each full backup's
+	// manifest; recovery drills compare the restored copy against them.
+	RecordRowCounts bool `yaml:"record_row_counts,omitempty"`
 }
 type Slack struct {
 	Enabled    bool   `yaml:"enabled"`
@@ -139,6 +169,8 @@ type PITR struct {
 type Overrides struct {
 	Database, OutputDir, Compression *string
 	KeepDays, KeepCount              *int
+	KeepDaily, KeepWeekly            *int
+	KeepMonthly, KeepYearly          *int
 }
 
 func Defaults() Config {
@@ -214,6 +246,14 @@ func Load(path string, o Overrides) (Config, error) {
 	}
 	if o.KeepCount != nil {
 		c.Retention.KeepCount = *o.KeepCount
+	}
+	for _, v := range []struct {
+		value *int
+		field *int
+	}{{o.KeepDaily, &c.Retention.KeepDaily}, {o.KeepWeekly, &c.Retention.KeepWeekly}, {o.KeepMonthly, &c.Retention.KeepMonthly}, {o.KeepYearly, &c.Retention.KeepYearly}} {
+		if v.value != nil {
+			*v.field = *v.value
+		}
 	}
 	return c, c.Validate()
 }
@@ -368,6 +408,18 @@ func (c Config) Validate() error {
 		if c.Storage.S3.Encryption != "" && c.Storage.S3.Encryption != "AES256" && c.Storage.S3.Encryption != "aws:kms" {
 			return invalid("storage.s3.encryption", "must be AES256 or aws:kms")
 		}
+		if lock := c.Storage.S3.ObjectLock; lock != nil {
+			if lock.Mode != "GOVERNANCE" && lock.Mode != "COMPLIANCE" {
+				return invalid("storage.s3.object_lock.mode", "must be GOVERNANCE or COMPLIANCE")
+			}
+			if lock.Days < 1 || lock.Days > 36500 {
+				return invalid("storage.s3.object_lock.days", "must be between 1 and 36500")
+			}
+			// A versionless delete would hide a locked version behind a delete marker.
+			if !c.Storage.S3.ProtectDeletes {
+				return invalid("storage.s3.protect_deletes", "must be true when storage.s3.object_lock is set")
+			}
+		}
 		if (c.Storage.S3.AccessKeyEnv == "") != (c.Storage.S3.SecretKeyEnv == "") {
 			return invalid("storage.s3", "both custom credential env names must be configured together")
 		}
@@ -400,8 +452,8 @@ func (c Config) Validate() error {
 	if c.Compression.Level < 1 || c.Compression.Level > 9 {
 		return invalid("compression.level", "must be between 1 and 9")
 	}
-	if c.Retention.KeepDays < 0 || c.Retention.KeepCount < 0 {
-		return invalid("retention", "keep_days and keep_count must be nonnegative")
+	if c.Retention.Negative() {
+		return invalid("retention", "keep_days, keep_count, keep_daily, keep_weekly, keep_monthly and keep_yearly must be nonnegative")
 	}
 	if c.Notifications.Slack.Enabled && c.Notifications.Slack.WebhookEnv == "" {
 		return invalid("notifications.slack.webhook_url_env", "required when Slack is enabled")

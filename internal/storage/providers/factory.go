@@ -52,7 +52,11 @@ func Open(ctx context.Context, c config.Storage) (storage.Provider, func() error
 				o.UsePathStyle = true
 			}
 		})
-		return &s3provider.Provider{Client: client, Bucket: c.S3.Bucket, Namespace: ns, Encryption: c.S3.Encryption, KMSKeyID: c.S3.KMSKeyID, ProtectDeletes: c.S3.ProtectDeletes}, closeFn, nil
+		p := &s3provider.Provider{Client: client, Bucket: c.S3.Bucket, Namespace: ns, Encryption: c.S3.Encryption, KMSKeyID: c.S3.KMSKeyID, ProtectDeletes: c.S3.ProtectDeletes}
+		if c.S3.ObjectLock != nil {
+			p.LockMode, p.LockDays = c.S3.ObjectLock.Mode, c.S3.ObjectLock.Days
+		}
+		return p, closeFn, nil
 	case "gcs":
 		ns, err := storage.NewNamespace(c.GCS.Prefix)
 		if err != nil {

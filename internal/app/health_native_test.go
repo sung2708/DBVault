@@ -23,6 +23,7 @@ import (
 type nativeMonitorStore struct {
 	storage.Provider
 	writes, archiveReads int
+	manifestReads, lists int
 	listErr              error
 }
 
@@ -37,10 +38,13 @@ func (p *nativeMonitorStore) Delete(context.Context, string) error {
 func (p *nativeMonitorStore) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	if !strings.HasSuffix(key, ".pitr.json") {
 		p.archiveReads++
+	} else {
+		p.manifestReads++
 	}
 	return p.Provider.Get(ctx, key)
 }
 func (p *nativeMonitorStore) List(ctx context.Context, prefix string) ([]storage.ObjectMetadata, error) {
+	p.lists++
 	if p.listErr != nil {
 		return nil, p.listErr
 	}
@@ -59,6 +63,8 @@ func TestNativeStorageOnlyHealth(t *testing.T) {
 	}{
 		{"fresh", time.Hour, false, "", Warning, 1},
 		{"verified", time.Hour, true, "", Healthy, 0},
+		{"baseline only", time.Hour, true, "baseline", Critical, 1},
+		{"newer baseline", time.Hour, true, "rotation", Healthy, 0},
 		{"boundary", 12 * time.Hour, true, "", Healthy, 0},
 		{"overdue", 12*time.Hour + time.Second, false, "", Critical, 1},
 		{"future", -time.Hour, false, "", Unknown, 1},
@@ -92,7 +98,17 @@ func TestNativeStorageOnlyHealth(t *testing.T) {
 				child.ParentHash = strings.Repeat("b", 64)
 			}
 			if tc.mutate != "empty" {
-				for _, m := range []pitr.Record{base, child} {
+				items := []pitr.Record{base, child}
+				if tc.mutate == "baseline" {
+					items = items[:1]
+				}
+				if tc.mutate == "rotation" {
+					newer := base
+					newer.Name = "pitr_00000000000000000000000000000003.tar.enc"
+					newer.From, newer.Until = now, now
+					items = append(items, newer)
+				}
+				for _, m := range items {
 					encoded, _ := json.Marshal(m)
 					if err = store.Put(ctx, m.Name+".pitr.json", bytes.NewReader(encoded), int64(len(encoded))); err != nil {
 						t.Fatal(err)
@@ -132,8 +148,14 @@ func TestNativeStorageOnlyHealth(t *testing.T) {
 			if !tc.verify && readonly.archiveReads != 0 {
 				t.Fatal("default monitor read archive")
 			}
-			if tc.name == "verified" && readonly.archiveReads != 2 {
-				t.Fatal("did not verify complete chain", readonly.archiveReads)
+			if tc.name == "verified" && (readonly.archiveReads != 2 || readonly.manifestReads != 2 || readonly.lists != 1) {
+				t.Fatalf("archive reads=%d manifest reads=%d lists=%d", readonly.archiveReads, readonly.manifestReads, readonly.lists)
+			}
+			if tc.mutate == "baseline" && !strings.Contains(r.Databases[0].Reason, "waiting for the first log capture") {
+				t.Fatal(r)
+			}
+			if tc.mutate == "rotation" && r.Databases[0].BackupName != child.Name {
+				t.Fatal("new baseline displaced the previous recovery coverage", r)
 			}
 		})
 	}

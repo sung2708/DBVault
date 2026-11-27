@@ -45,6 +45,9 @@ type Renderer struct {
 	rate        float64
 	sampleAt    time.Time
 	sampleBytes int64
+	// Last OSC 9;4 sequence sent and when, for keep-alive and clearing.
+	taskbarState string
+	taskbarSent  time.Time
 }
 
 func New(out, err io.Writer, o Options) *Renderer {
@@ -62,6 +65,8 @@ func New(out, err io.Writer, o Options) *Renderer {
 	}
 	outCaps.Color = outCaps.Color && outCaps.TTY
 	errCaps.Color = errCaps.Color && errCaps.TTY
+	// Terminal progress follows the animation policy (no JSON, quiet or no-color).
+	errCaps.Progress = errCaps.Progress && errCaps.Color && outCaps.Color
 	if outCaps.Width <= 0 {
 		outCaps.Width = 80
 	}

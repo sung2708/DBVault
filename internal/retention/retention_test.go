@@ -69,3 +69,80 @@ func TestIncrementalCleanupOrderAndProtection(t *testing.T) {
 		t.Fatal("cyclic obsolete chain accepted")
 	}
 }
+
+func TestCalendarRetention(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	var items []metadata.Manifest
+	// Two backups a day for 120 days, newest first after sorting.
+	for d := 0; d < 120; d++ {
+		for _, h := range []int{2, 14} {
+			at := time.Date(2026, 11, 27, h, 0, 0, 0, time.UTC).AddDate(0, 0, -d)
+			if at.After(now) {
+				continue
+			}
+			items = append(items, backup(at.Format("db_20060102_15"), "a", at))
+		}
+	}
+	policy := config.Retention{KeepDaily: 7, KeepWeekly: 4, KeepMonthly: 3}
+	selected, err := Select(items, policy, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted := map[string]bool{}
+	for _, m := range selected {
+		deleted[m.Name] = true
+	}
+	kept := []string{}
+	for _, m := range items {
+		if !deleted[m.Name] {
+			kept = append(kept, m.Name)
+		}
+	}
+	want := map[string]bool{
+		// Newest of each of the last 7 days (today only has the 02:00 backup).
+		"db_20261127_02": true, "db_20261126_14": true, "db_20261125_14": true, "db_20261124_14": true,
+		"db_20261123_14": true, "db_20261122_14": true, "db_20261121_14": true,
+		// Newest of ISO weeks 48 (today), 47, 46 and 45: Sundays.
+		"db_20261115_14": true, "db_20261108_14": true,
+		// Newest of November (today), October and September.
+		"db_20261031_14": true, "db_20260930_14": true,
+	}
+	if len(kept) != len(want) {
+		t.Fatalf("kept %d backups %v, want %d", len(kept), kept, len(want))
+	}
+	for _, name := range kept {
+		if !want[name] {
+			t.Fatalf("unexpected kept backup %s in %v", name, kept)
+		}
+	}
+
+	// Calendar rules combine with count and age as a union.
+	selected, err = Select(items, config.Retention{KeepYearly: 1, KeepCount: 3}, now)
+	if err != nil || len(selected) != len(items)-3 {
+		t.Fatalf("yearly+count: %d selected, %v", len(selected), err)
+	}
+	if _, err := Select(items, config.Retention{KeepWeekly: -1}, now); err == nil {
+		t.Fatal("negative calendar rule accepted")
+	}
+}
+
+func TestCalendarSkipsEmptyPeriods(t *testing.T) {
+	jan := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+	items := []Dated{{"nov", jan.AddDate(0, 10, 0)}, {"mar", jan.AddDate(0, 2, 0)}, {"jan", jan}}
+	got := Calendar(items, config.Retention{KeepMonthly: 2})
+	if !got["nov"] || !got["mar"] || got["jan"] {
+		t.Fatalf("months without backups must not use the count: %v", got)
+	}
+}
+
+func TestSelectiveBackupCannotDisplaceWholeDatabaseBackup(t *testing.T) {
+	now := time.Now()
+	partial := backup("partial", "orders", now)
+	partial.Database.IncludeTables = []string{"public.audit_log"}
+	full := backup("full", "orders", now.Add(-time.Hour))
+	old := backup("old", "orders", now.Add(-2*time.Hour))
+	got, err := Select([]metadata.Manifest{partial, old, full}, config.Retention{KeepCount: 1}, now)
+	if err != nil || len(got) != 1 || got[0].Name != old.Name {
+		t.Fatalf("selected %v: %v", got, err)
+	}
+}

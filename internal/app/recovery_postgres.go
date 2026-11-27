@@ -17,6 +17,7 @@ import (
 func (s *Service) postgresRecoveryDrill(ctx context.Context, o DrillOptions, native runner.Runner) (r DrillResult, resultErr error) {
 	r = DrillResult{Version: 1, Status: "failed", BackupName: o.Target, Engine: "postgres", StartedAt: s.now(), TargetState: "not_created", DryRun: o.DryRun,
 		Stages: []DrillStage{{"isolation", "pending"}, {"metadata", "pending"}, {"integrity", "pending"}, {"compatibility", "pending"}, {"restore", "pending"}, {"validation", "pending"}, {"cleanup", "not_requested"}, {"record", "pending"}}}
+	var sourceRows *metadata.RowCounts
 	stage := func(name, status string) {
 		for i := range r.Stages {
 			if r.Stages[i].Name == name {
@@ -101,6 +102,7 @@ func (s *Service) postgresRecoveryDrill(ctx context.Context, o DrillOptions, nat
 		}
 		if e.Stage == "manifest" && e.State == "complete" {
 			r.BackupID, r.Checksum, r.SourceDatabase = e.Manifest.ID, e.Manifest.Checksum.Hash, e.Manifest.Database.Name
+			sourceRows = e.Manifest.RowCounts
 		}
 		if s.Observe != nil {
 			s.Observe(e)
@@ -151,11 +153,15 @@ func (s *Service) postgresRecoveryDrill(ctx context.Context, o DrillOptions, nat
 	}
 	stage("validation", "running")
 	s.stage("recovery.validation", "start")
-	validation, err := target.ValidateRecovery(ctx)
+	validation, err := target.ValidateRecovery(ctx, sourceRows != nil)
 	if err != nil {
 		return r, err
 	}
+	err = checkRows(&validation, sourceRows)
 	r.Validation = &validation
+	if err != nil {
+		return r, err
+	}
 	stage("validation", "passed")
 	s.stage("recovery.validation", "complete")
 	if err := ctx.Err(); err != nil {

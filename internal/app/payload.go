@@ -8,15 +8,17 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"reflect"
+	"slices"
 	"time"
 
 	"github.com/sung2708/DBVault/internal/compression"
+	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/delta"
 	"github.com/sung2708/DBVault/internal/encryption"
 	"github.com/sung2708/DBVault/internal/keymanager"
 	"github.com/sung2708/DBVault/internal/metadata"
 	"github.com/sung2708/DBVault/internal/pipeline"
+	"github.com/sung2708/DBVault/internal/storage"
 )
 
 func removeTemp(f *os.File) {
@@ -47,23 +49,50 @@ func (s *Service) latestBase(ctx context.Context) (metadata.Manifest, error) {
 		return metadata.Manifest{}, err
 	}
 	for _, m := range items {
-		if m.Database.Engine == s.DB.Name() && m.Database.Name == s.Config.Database.Database && m.Database.Format == s.DB.Format() && reflect.DeepEqual(m.Database.IncludeTables, nonempty(s.Config.Database.Options.IncludeTables)) && reflect.DeepEqual(m.Database.ExcludeTables, nonempty(s.Config.Database.Options.ExcludeTables)) && reflect.DeepEqual(m.Database.IncludeCollections, nonempty(s.Config.Database.Options.IncludeCollections)) && reflect.DeepEqual(m.Database.ExcludeCollections, nonempty(s.Config.Database.Options.ExcludeCollections)) {
+		if m.Database.Engine == s.DB.Name() && m.Database.Format == s.DB.Format() && matchesBackupScope(m.Database, s.Config.Database) {
+			pending, err := storage.DeletePending(ctx, s.Store, m.Name, ".meta.json")
+			if err != nil {
+				return metadata.Manifest{}, err
+			}
+			if pending {
+				return metadata.Manifest{}, fmt.Errorf("base backup %s has a pending deletion", m.Name)
+			}
 			return m, nil
 		}
 	}
 	return metadata.Manifest{}, fmt.Errorf("no matching base backup; create a full backup first")
 }
-func nonempty(s []string) []string {
-	if len(s) == 0 {
-		return nil
+
+// MatchesBackup selects backups covering the configured database and selectors.
+func (s *Service) MatchesBackup(m metadata.Manifest) bool {
+	return m.Database.Engine == s.Config.Database.Type && matchesBackupScope(m.Database, s.Config.Database)
+}
+
+func matchesBackupScope(d metadata.Database, db config.Database) bool {
+	o := db.Options
+	return sameBackupScope(d, metadata.Database{
+		Name: db.Database, IncludeTables: o.IncludeTables, ExcludeTables: o.ExcludeTables,
+		IncludeCollections: o.IncludeCollections, ExcludeCollections: o.ExcludeCollections,
+	})
+}
+
+func sameBackupScope(a, b metadata.Database) bool {
+	return a.Name == b.Name &&
+		sameSelectors(a.IncludeTables, b.IncludeTables) && sameSelectors(a.ExcludeTables, b.ExcludeTables) &&
+		sameSelectors(a.IncludeCollections, b.IncludeCollections) && sameSelectors(a.ExcludeCollections, b.ExcludeCollections)
+}
+
+func sameSelectors(a, b []string) bool {
+	if slices.Equal(a, b) {
+		return true
 	}
-	return s
+	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
 }
 
 func validateBase(m, base metadata.Manifest) error {
-	baseDatabase, currentDatabase := base.Database, m.Database
-	baseDatabase.Version, currentDatabase.Version = "", ""
-	if m.Delta == nil || base.ID != m.Delta.BaseID || base.Checksum.Hash != m.Delta.BaseHash || !reflect.DeepEqual(baseDatabase, currentDatabase) {
+	if m.Delta == nil || base.ID != m.Delta.BaseID || base.Checksum.Hash != m.Delta.BaseHash ||
+		base.Database.Engine != m.Database.Engine || base.Database.Format != m.Database.Format ||
+		!sameBackupScope(base.Database, m.Database) {
 		return fmt.Errorf("incremental base identity or database mismatch")
 	}
 	depth := 0
@@ -86,25 +115,32 @@ func (s *Service) VerifyChain(ctx context.Context, key string) error {
 	return s.dependencyChain(ctx, m, true)
 }
 
-// VerifyCatalog verifies each archive once before cleanup and checks every dependency.
-func (s *Service) VerifyCatalog(ctx context.Context, items []metadata.Manifest) error {
-	verified := make(map[string]metadata.Manifest, len(items))
-	for _, item := range items {
-		m, err := s.Verify(ctx, item.Name)
-		if err != nil {
-			return err
-		}
-		verified[m.Name] = m
+func (s *Service) verifyCatalog(ctx context.Context, items []metadata.Manifest, expired map[string]bool) error {
+	catalog := make(map[string]metadata.Manifest, len(items))
+	for _, m := range items {
+		catalog[m.Name] = m
 	}
-	for _, m := range verified {
+	for _, m := range items {
 		if m.Delta != nil {
-			base, ok := verified[m.Delta.BaseName]
+			base, ok := catalog[m.Delta.BaseName]
 			if !ok {
 				return fmt.Errorf("incremental base artifact is missing")
 			}
 			if err := validateBase(m, base); err != nil {
 				return err
 			}
+		}
+		if expired[m.Name] {
+			exists, err := s.Store.Exists(ctx, m.Name)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				continue
+			}
+		}
+		if _, err := s.Verify(ctx, m.Name); err != nil {
+			return err
 		}
 	}
 	return nil

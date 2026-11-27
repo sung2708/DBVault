@@ -38,6 +38,8 @@ func (f *fakeDocker) Run(_ context.Context, s runner.Spec) error {
 			out = fmt.Sprintf("PostgreSQL %d.4", major)
 		} else if strings.Contains(joined, "SHOW server_version_num") {
 			out = fmt.Sprintf("%d0004", major)
+		} else if strings.Contains(joined, "--field-separator-zero") {
+			out = "public.fixture\x001\x00"
 		} else if strings.Contains(joined, "BEGIN READ ONLY") {
 			out = "2"
 		}
@@ -101,8 +103,8 @@ func TestOwnedContainerLifecycleAndSecretArguments(t *testing.T) {
 	if err := target.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	v, err := target.ValidateRecovery(ctx)
-	if err != nil || v.Objects != 2 || v.Method != ValidationMethod {
+	v, err := target.ValidateRecovery(ctx, true)
+	if err != nil || v.Objects != 2 || v.Method != ValidationMethod || v.Rows["public.fixture"] != 1 {
 		t.Fatal(v, err)
 	}
 	if err := target.Cleanup(ctx); err != nil {
@@ -110,6 +112,9 @@ func TestOwnedContainerLifecycleAndSecretArguments(t *testing.T) {
 	}
 	for _, s := range f.specs {
 		joined := strings.Join(s.Args, " ")
+		if strings.Contains(joined, "DO $$") {
+			t.Fatal("row evidence repeated the restored table scans")
+		}
 		if strings.Contains(joined, target.Password) {
 			t.Fatal("password in process arguments")
 		}

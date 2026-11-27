@@ -56,12 +56,12 @@ recovery drills and [independent monitoring](docs/independent-monitoring.md).
 The AWS live verification fixture is available, and live S3/KMS/Object Lock
 verification is pending. See the [verification procedure](docs/testing.md#release-verification-on-aws).
 
-Version `v0.9.2` packages updated database clients and runtime libraries.
-Install it with
+The latest published release, `v0.9.2`, packages PostgreSQL 16 clients and
+MongoDB Database Tools 100.20.0. Install it with
 `go install github.com/sung2708/DBVault/cmd/dbvault@v0.9.2`.
-The PostgreSQL and MongoDB images package the clients DBVault uses. MongoDB Tools are rebuilt from the same 100.20.0 source with patched
-dependencies. See [container security updates](docs/installation.md#container-security-updates)
-for the build details and current scan limitations.
+The current source adds PostgreSQL 17 and 18 images and MongoDB Database
+Tools 100.20.1 for a future tagged release. See the
+[container build details](docs/installation.md#container-security-updates).
 
 See the [changelog](CHANGELOG.md).
 
@@ -148,7 +148,10 @@ Key architectural tenets:
 | **Sidecar Metadata** | Implemented | Versioned JSON metadata; completed manifests register backups |
 | **Slack Notifications** | Implemented | HTTPS backup/restore completion and failure notifications |
 | **Cron Scheduling** | Implemented | Persistent definitions and supervised foreground daemon |
-| **Retention Cleanup** | Implemented | Explicit cleanup command; per-database count/age protections; newest backup always retained |
+| **Retention Cleanup** | Implemented | Explicit cleanup command; per-database count/age and daily/weekly/monthly/yearly (GFS) protections; newest backup always retained |
+| **S3 Object Lock** | Implemented | Optional per-object GOVERNANCE/COMPLIANCE retention on archives, manifests and evidence |
+| **Row count evidence** | Implemented | Optional `protection.record_row_counts`; recovery drills compare restored tables with the source |
+| **Live status** | Implemented | `status --watch` refreshes in place; terminal tab/taskbar progress on supporting terminals |
 | **Dry-Run Mode** | Implemented | Backup preflight, verified restore preflight, deletion/cleanup preview |
 
 ---
@@ -630,7 +633,10 @@ docker pull sungp2708/dbvault:postgres
 docker run --rm sungp2708/dbvault:postgres --help
 ```
 
-Available tags are `postgres`, `mysql`, `mongodb`, and `sqlite`. To build and
+The published `v0.9.2` images use the `postgres`, `mysql`, `mongodb`, and
+`sqlite` aliases. Its PostgreSQL image targets server major 16.
+The next tagged build will also publish `postgres16`, `postgres17` and
+`postgres18`, with `postgres` continuing to point to 16. To build and
 publish an image manually from this repository, log in to Docker Hub and run:
 
 ```bash
@@ -648,13 +654,15 @@ without publishing:
 
 ```bash
 docker build --target postgres -t dbvault:postgres .
+docker build --target postgres --build-arg POSTGRES_MAJOR=18 -t dbvault:postgres18 .
 docker build --target mysql -t dbvault:mysql .
 docker build --target mongodb -t dbvault:mongodb .
 docker build --target sqlite -t dbvault:sqlite .
 docker run --rm dbvault:postgres --help
 ```
 
-Targets run as non-root users. PostgreSQL includes client 16, MySQL includes 8.4
+Targets run as non-root users. PostgreSQL includes client 16 by default
+(`POSTGRES_MAJOR` selects 17 or 18), MySQL includes 8.4
 clients, MongoDB includes its Database Tools, and SQLite needs no client executable.
 Actual backups additionally require mounted configuration/storage, credentials and
 network access to the database.

@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/sung2708/DBVault/internal/fault"
 	"github.com/sung2708/DBVault/internal/metadata"
+	"github.com/sung2708/DBVault/internal/storage"
 )
 
 type HealthStatus string
@@ -78,6 +80,10 @@ func (e *HealthFailure) Error() string { return "backup health: " + string(e.Sta
 // Default mode never opens archive contents. Explicit --verify uses the shared
 // verifier and persists a small immutable record for the selected backup.
 func (s *Service) Health(ctx context.Context, verify bool) (HealthReport, error) {
+	return s.HealthWithEvidenceCache(ctx, verify, nil)
+}
+
+func (s *Service) HealthWithEvidenceCache(ctx context.Context, verify bool, cache *EvidenceCache) (HealthReport, error) {
 	if s.Config.Health.BackupScope == "pitr" {
 		return s.nativeHealth(ctx, verify)
 	}
@@ -123,7 +129,7 @@ func (s *Service) Health(ctx context.Context, verify bool) (HealthReport, error)
 			h.Reason = "Registered metadata could not be validated; latest backup cannot be determined"
 			return finish(err)
 		}
-		if m.Database.Engine != h.Engine || m.Database.Name != h.Name {
+		if !s.MatchesBackup(m) {
 			continue
 		}
 		matching = append(matching, m)
@@ -164,82 +170,62 @@ func (s *Service) Health(ctx context.Context, verify bool) (HealthReport, error)
 	h.StoredBytes = latest.Pipeline.Stored
 	at := latest.CreatedAt.UTC()
 	h.LastBackupAt = &at
-	// Immutable drill records must match this exact backup identity and checksum.
-	// A damaged/unreadable history object never becomes positive recovery evidence.
-	var drill *DrillResult
-	for _, object := range objects {
-		if !strings.HasSuffix(object.Key, ".recovery.json") {
-			continue
+	cache.reset(s.Config.Storage)
+	if !verify {
+		if err := s.readRecoveryEvidence(ctx, objects, *latest, now, cache, &h); err != nil {
+			return finish(err)
 		}
-		reader, err := s.Store.Get(ctx, object.Key)
-		if err != nil {
-			h.RecoveryNote = "Some recovery evidence is unavailable"
-			continue
+		checkPrefix := evidencePrefix("verification_", latest.ID)
+		var verification *VerificationRecord
+		for _, object := range objects {
+			if !strings.HasPrefix(object.Key, "verification_") || !strings.HasSuffix(object.Key, ".json") {
+				continue
+			}
+			match, legacy := evidenceMatches(object.Key, "verification_", checkPrefix)
+			if !match {
+				continue
+			}
+			var entries map[string]cachedEvidence[VerificationRecord]
+			if legacy && cache != nil {
+				entries = cache.checks
+			}
+			record, err, unavailable := readEvidence(ctx, s.Store, object, entries, DecodeVerification)
+			if ctx.Err() != nil {
+				return finish(ctx.Err())
+			}
+			if unavailable {
+				h.VerificationNote = "Some verification evidence is unavailable"
+				continue
+			}
+			if err != nil || record.RecordKey != object.Key {
+				h.VerificationNote = "Some verification evidence is invalid"
+				continue
+			}
+			if record.BackupID != latest.ID || record.BackupName != latest.Name || record.Checksum != latest.Checksum.Hash || record.Engine != latest.Database.Engine || record.Database != latest.Database.Name {
+				continue
+			}
+			if record.CompletedAt.After(now) {
+				h.VerificationNote = "Verification evidence has a future timestamp"
+				continue
+			}
+			if verification == nil || record.CompletedAt.After(verification.CompletedAt) || (record.CompletedAt.Equal(verification.CompletedAt) && record.RecordKey < verification.RecordKey) {
+				copy := record
+				verification = &copy
+			}
 		}
-		record, err := DecodeDrill(reader)
-		reader.Close()
-		if err != nil || record.RecordKey != object.Key {
-			h.RecoveryNote = "Some recovery evidence is invalid"
-			continue
-		}
-		if record.BackupID != latest.ID || record.BackupName != latest.Name || record.Checksum != latest.Checksum.Hash || record.Engine != latest.Database.Engine || record.SourceDatabase != latest.Database.Name {
-			continue
-		}
-		if record.CompletedAt.After(now) {
-			h.RecoveryNote = "Recovery evidence has future timestamps"
-			continue
-		}
-		if drill == nil || record.CompletedAt.After(drill.CompletedAt) || (record.CompletedAt.Equal(drill.CompletedAt) && record.RecordKey < drill.RecordKey) {
-			copy := record
-			drill = &copy
-		}
-	}
-	if h.RecoveryNote == "" && drill != nil {
-		h.RestoreTest = drill.Status
-		at := drill.CompletedAt.UTC()
-		h.LastRecoveryDrillAt = &at
-		h.RecoveryRecord = drill.RecordKey
-	}
-	var verification *VerificationRecord
-	for _, object := range objects {
-		if !strings.HasPrefix(object.Key, "verification_") || !strings.HasSuffix(object.Key, ".json") {
-			continue
-		}
-		reader, err := s.Store.Get(ctx, object.Key)
-		if err != nil {
-			h.VerificationNote = "Some verification evidence is unavailable"
-			continue
-		}
-		record, err := DecodeVerification(reader)
-		reader.Close()
-		if err != nil || record.RecordKey != object.Key {
-			h.VerificationNote = "Some verification evidence is invalid"
-			continue
-		}
-		if record.BackupID != latest.ID || record.BackupName != latest.Name || record.Checksum != latest.Checksum.Hash || record.Engine != latest.Database.Engine || record.Database != latest.Database.Name {
-			continue
-		}
-		if record.CompletedAt.After(now) {
-			h.VerificationNote = "Verification evidence has a future timestamp"
-			continue
-		}
-		if verification == nil || record.CompletedAt.After(verification.CompletedAt) || (record.CompletedAt.Equal(verification.CompletedAt) && record.RecordKey < verification.RecordKey) {
-			copy := record
-			verification = &copy
-		}
-	}
-	if verification != nil {
-		if verification.Status == "verified" {
-			h.Integrity = "verified"
-			at := verification.CompletedAt.UTC()
-			h.LastVerifiedAt = &at
-		} else if verification.Status == "failed" {
-			h.Integrity = "failed"
-			at := verification.CompletedAt.UTC()
-			h.LastVerifiedAt = &at
-			h.VerificationNote = "Latest stored-artifact verification failed (" + verification.FailureCategory + ")"
-		} else {
-			h.VerificationNote = "Latest stored-artifact verification was cancelled"
+		if verification != nil {
+			if verification.Status == "verified" {
+				h.Integrity = "verified"
+				at := verification.CompletedAt.UTC()
+				h.LastVerifiedAt = &at
+			} else if verification.Status == "failed" {
+				h.Integrity = "failed"
+				at := verification.CompletedAt.UTC()
+				h.LastVerifiedAt = &at
+				h.VerificationNote = "Latest stored-artifact verification failed (" + verification.FailureCategory + ")"
+			} else {
+				h.VerificationNote = "Latest stored-artifact verification was cancelled"
+			}
 		}
 	}
 	if latest.CreatedAt.After(now) || latest.CompletedAt.After(now) {
@@ -301,6 +287,9 @@ func (s *Service) Health(ctx context.Context, verify bool) (HealthReport, error)
 		h.Integrity = "verified"
 		at := s.now()
 		h.LastVerifiedAt = &at
+		if err := s.readRecoveryEvidence(ctx, objects, *latest, at, cache, &h); err != nil {
+			h.RecoveryNote = "Recovery evidence check did not finish"
+		}
 	}
 	if !verify {
 		if err := s.dependencyChain(ctx, *latest, false); err != nil {
@@ -343,4 +332,59 @@ func (s *Service) Health(ctx context.Context, verify bool) (HealthReport, error)
 		h.Reason = "Backup is within freshness policy and stored integrity passed this check"
 	}
 	return finish(nil)
+}
+
+func (s *Service) readRecoveryEvidence(ctx context.Context, objects []storage.ObjectMetadata, latest metadata.Manifest, now time.Time, cache *EvidenceCache, h *DatabaseHealth) error {
+	// Immutable drill records must match this exact backup identity and checksum.
+	// A damaged/unreadable history object never becomes positive recovery evidence.
+	drillPrefix := evidencePrefix("recovery_", latest.ID)
+	var drill *DrillResult
+	for _, object := range objects {
+		if !strings.HasSuffix(object.Key, ".recovery.json") {
+			continue
+		}
+		match, legacy := evidenceMatches(object.Key, "recovery_", drillPrefix)
+		if !match {
+			continue
+		}
+		var entries map[string]cachedEvidence[DrillResult]
+		if legacy && cache != nil {
+			entries = cache.drills
+		}
+		record, err, unavailable := readEvidence(ctx, s.Store, object, entries, func(reader io.Reader) (DrillResult, error) {
+			record, err := DecodeDrill(reader)
+			record.Validation = nil
+			record.Stages = nil
+			return record, err
+		})
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if unavailable {
+			h.RecoveryNote = "Some recovery evidence is unavailable"
+			continue
+		}
+		if err != nil || record.RecordKey != object.Key {
+			h.RecoveryNote = "Some recovery evidence is invalid"
+			continue
+		}
+		if record.BackupID != latest.ID || record.BackupName != latest.Name || record.Checksum != latest.Checksum.Hash || record.Engine != latest.Database.Engine || record.SourceDatabase != latest.Database.Name {
+			continue
+		}
+		if record.CompletedAt.After(now) {
+			h.RecoveryNote = "Recovery evidence has future timestamps"
+			continue
+		}
+		if drill == nil || record.CompletedAt.After(drill.CompletedAt) || (record.CompletedAt.Equal(drill.CompletedAt) && record.RecordKey < drill.RecordKey) {
+			copy := record
+			drill = &copy
+		}
+	}
+	if h.RecoveryNote == "" && drill != nil {
+		h.RestoreTest = drill.Status
+		at := drill.CompletedAt.UTC()
+		h.LastRecoveryDrillAt = &at
+		h.RecoveryRecord = drill.RecordKey
+	}
+	return nil
 }

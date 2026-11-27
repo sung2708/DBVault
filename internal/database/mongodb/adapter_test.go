@@ -85,3 +85,22 @@ func TestSafeArchiveCommands(t *testing.T) {
 		t.Fatal("unquiesced snapshot accepted")
 	}
 }
+
+func TestRestoreToolAcceptsSameSeriesNewerPatch(t *testing.T) {
+	for _, tc := range []struct {
+		source, restore string
+		want            bool
+	}{
+		{"100.20.0", "100.20.0", true},
+		{"100.20.0", "100.20.1", true},
+		{"100.20.1", "100.20.0", false},
+		{"100.19.1", "100.20.1", false},
+		{"100.20.0", "mongorestore version: 100.20.1", true},
+		{"", "100.20.1", false},
+		{"100.20.0", "garbage", false},
+	} {
+		if got := restoreToolCompatible(tc.source, tc.restore); got != tc.want {
+			t.Errorf("restoreToolCompatible(%q, %q) = %t, want %t", tc.source, tc.restore, got, tc.want)
+		}
+	}
+}

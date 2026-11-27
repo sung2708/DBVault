@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestMultipartConditionalCommitAndAbort(t *testing.T) {
@@ -142,5 +144,64 @@ func TestProtectedDeletes(t *testing.T) {
 	}
 	if got := deletes.Load(); got != 2 {
 		t.Fatalf("sent %d S3 delete requests, want 2", got)
+	}
+}
+
+func TestObjectLockRetentionOnBackupsNotOperationLocks(t *testing.T) {
+	type request struct{ method, path, mode, until, checksum string }
+	var mu sync.Mutex
+	var requests []request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		q := r.URL.Query()
+		checksum := r.Header.Get("X-Amz-Checksum-Crc32") + r.Header.Get("X-Amz-Sdk-Checksum-Algorithm") + r.Header.Get("X-Amz-Trailer")
+		mu.Lock()
+		requests = append(requests, request{r.Method, r.URL.Path, r.Header.Get("X-Amz-Object-Lock-Mode"), r.Header.Get("X-Amz-Object-Lock-Retain-Until-Date"), checksum})
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/xml")
+		switch {
+		case r.Method == "POST" && q.Has("uploads"):
+			fmt.Fprint(w, `<InitiateMultipartUploadResult><UploadId>locked-upload</UploadId></InitiateMultipartUploadResult>`)
+		case r.Method == "PUT" && q.Has("partNumber"):
+			w.Header().Set("ETag", `"part"`)
+		case r.Method == "POST" && q.Has("uploadId"):
+			fmt.Fprint(w, `<CompleteMultipartUploadResult><ETag>final</ETag></CompleteMultipartUploadResult>`)
+		default:
+			w.Header().Set("ETag", `"object"`)
+		}
+	}))
+	defer server.Close()
+	client := sdk.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""), HTTPClient: server.Client()}, func(o *sdk.Options) {
+		o.BaseEndpoint = aws.String(server.URL)
+		o.UsePathStyle = true
+		o.RetryMaxAttempts = 1
+		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+	})
+	now := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	p := &Provider{Client: client, Bucket: "bucket", PartSize: 5 << 20, LockMode: "COMPLIANCE", LockDays: 30, Now: func() time.Time { return now }}
+	ctx := context.Background()
+	if err := p.Put(ctx, "backup.meta.json", bytes.NewReader([]byte("metadata")), 8); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Put(ctx, "backup.dump.gz", bytes.NewReader(bytes.Repeat([]byte("x"), 6<<20)), -1); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Put(ctx, "dbvault_chain.lock", bytes.NewReader([]byte("lock")), 4); err != nil {
+		t.Fatal(err)
+	}
+	want := now.AddDate(0, 0, 30).Format(time.RFC3339)
+	var lockedPut, lockedMultipart, unlockedOperation bool
+	for _, r := range requests {
+		switch {
+		case r.method == "PUT" && strings.HasSuffix(r.path, "/backup.meta.json"):
+			lockedPut = r.mode == "COMPLIANCE" && strings.HasPrefix(r.until, want[:19]) && r.checksum != ""
+		case r.method == "POST" && strings.HasSuffix(r.path, "/backup.dump.gz") && r.mode != "":
+			lockedMultipart = r.mode == "COMPLIANCE" && strings.HasPrefix(r.until, want[:19])
+		case r.method == "PUT" && strings.HasSuffix(r.path, "/dbvault_chain.lock"):
+			unlockedOperation = r.mode == "" && r.until == ""
+		}
+	}
+	if !lockedPut || !lockedMultipart || !unlockedOperation {
+		t.Fatalf("object lock headers: put=%t multipart=%t operation-lock-unlocked=%t in %+v", lockedPut, lockedMultipart, unlockedOperation, requests)
 	}
 }

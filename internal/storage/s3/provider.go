@@ -23,6 +23,32 @@ type Provider struct {
 	Encryption, KMSKeyID string
 	PartSize             int64
 	ProtectDeletes       bool
+	// LockMode (GOVERNANCE or COMPLIANCE) and LockDays request Object Lock
+	// retention on each new object except DBVault's own operation locks.
+	LockMode string
+	LockDays int
+	Now      func() time.Time
+}
+
+// operationLock names the short-lived coordination objects DBVault must be able
+// to delete; DBVault leaves their retention to the bucket default.
+func operationLock(key string) bool {
+	return key == "dbvault_chain.lock" || key == "dbvault_pitr.lock"
+}
+
+func (p *Provider) applyObjectLock(key string, input *sdk.PutObjectInput) {
+	if p.LockMode == "" || operationLock(key) {
+		return
+	}
+	now := time.Now
+	if p.Now != nil {
+		now = p.Now
+	}
+	input.ObjectLockMode = types.ObjectLockMode(p.LockMode)
+	input.ObjectLockRetainUntilDate = aws.Time(now().UTC().AddDate(0, 0, p.LockDays))
+	// S3 requires an integrity checksum on writes with Object Lock parameters,
+	// even when the SDK is configured to send checksums only when required.
+	input.ChecksumAlgorithm = types.ChecksumAlgorithmCrc32
 }
 
 func (p *Provider) Put(ctx context.Context, key string, r io.Reader, size int64) error {
@@ -40,6 +66,7 @@ func (p *Provider) Put(ctx context.Context, key string, r io.Reader, size int64)
 	if size >= 0 {
 		input.ContentLength = aws.Int64(size)
 	}
+	p.applyObjectLock(key, input)
 	if size >= 0 && size < 5<<20 {
 		// Small known-size objects are bounded before signing and publication;
 		// this also keeps the SDK body seekable for authenticated HTTP uploads.
@@ -108,7 +135,7 @@ func (p *Provider) Exists(ctx context.Context, key string) (bool, error) {
 }
 func (p *Provider) Delete(ctx context.Context, key string) error {
 	// Object Lock permits delete markers; keep backup objects visible while releasing operation locks.
-	if p.ProtectDeletes && key != "dbvault_chain.lock" && key != "dbvault_pitr.lock" {
+	if p.ProtectDeletes && !operationLock(key) {
 		return errors.New("S3 deletion disabled by storage.s3.protect_deletes")
 	}
 	object, err := p.Namespace.Object(key)

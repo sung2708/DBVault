@@ -51,6 +51,18 @@ func (r *baselineRunner) Run(_ context.Context, spec runner.Spec) error {
 	return err
 }
 
+type manifestReadCounter struct {
+	storage.Provider
+	reads int
+}
+
+func (s *manifestReadCounter) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	if strings.HasSuffix(key, ".pitr.json") {
+		s.reads++
+	}
+	return s.Provider.Get(ctx, key)
+}
+
 func TestNativeBaselineRefreshAndNoSilentReset(t *testing.T) {
 	ctx := context.Background()
 	store, err := local.New(t.TempDir())
@@ -70,11 +82,13 @@ func TestNativeBaselineRefreshAndNoSilentReset(t *testing.T) {
 		t.Fatal(fresh, err, fake.dumps)
 	}
 	fake.version = "8.4.1"
+	counted := &manifestReadCounter{Provider: store}
+	svc.Store = counted
 	if _, err = svc.Backup(ctx, "incremental", 0); err == nil || !strings.Contains(err.Error(), "identity/version changed") {
 		t.Fatal("capture reset silently", err)
 	}
-	if fake.dumps != 2 {
-		t.Fatal("unexpected full dump after capture failure")
+	if fake.dumps != 2 || counted.reads != 2 {
+		t.Fatalf("dumps=%d manifest reads=%d, expected two of each", fake.dumps, counted.reads)
 	}
 	if ok, _ := store.Exists(ctx, "dbvault_pitr.lock"); ok {
 		t.Fatal("failed capture leaked lock")
@@ -163,18 +177,18 @@ func TestNativeAutomaticParentSelection(t *testing.T) {
 	grandchild := retentionRecord(3, child.Until, &child)
 	other := retentionRecord(4, now, nil)
 	other.Identity = "other"
-	got, at, err := selectParent([]Record{child, other, base, grandchild}, "source")
-	if err != nil || got.Name != grandchild.Name || !at.Equal(base.Until) {
+	got, at, chainLength, err := selectParent([]Record{child, other, base, grandchild}, "source")
+	if chainLength != 3 || err != nil || got.Name != grandchild.Name || !at.Equal(base.Until) {
 		t.Fatal(got, at, err)
 	}
 	newBase := retentionRecord(5, now, nil)
 	// The newest baseline supersedes an older chain even if its tip has a later clock.
 	grandchild.Until = now.Add(time.Hour)
-	got, _, err = selectParent([]Record{grandchild, base, newBase, child}, "source")
+	got, _, _, err = selectParent([]Record{grandchild, base, newBase, child}, "source")
 	if err != nil || got.Name != newBase.Name {
 		t.Fatal(got, err)
 	}
-	got, _, err = selectParent([]Record{base}, "unknown")
+	got, _, _, err = selectParent([]Record{base}, "unknown")
 	if err != nil || got.Name != "" {
 		t.Fatal(got, err)
 	}
@@ -218,6 +232,9 @@ func TestNativeCleanupVerificationPreviewAndLock(t *testing.T) {
 	}
 	if _, err = svc.Cleanup(ctx, now, false); err == nil {
 		t.Fatal("cleanup ignored lock")
+	}
+	if got, err := svc.Cleanup(ctx, now, true); err != nil || len(got) != 2 {
+		t.Fatalf("read-only preview while lock is held: %v, %v", got, err)
 	}
 	err = nil
 	release(&err)
@@ -291,7 +308,7 @@ func TestCleanupReportsLockReleaseFailure(t *testing.T) {
 	defer store.Close()
 	denied := errors.New("delete denied")
 	svc := Service{Store: lockDeleteFailure{Provider: store, err: denied}}
-	_, err = svc.Cleanup(context.Background(), time.Now(), true)
+	_, err = svc.Cleanup(context.Background(), time.Now(), false)
 	if !errors.Is(err, denied) || !strings.Contains(err.Error(), "release dbvault_pitr.lock") {
 		t.Fatalf("cleanup error = %v", err)
 	}
@@ -371,5 +388,81 @@ func TestCaptureRejectsAppendAtChainLimit(t *testing.T) {
 	}
 	if _, err := svc.Capture(ctx, tail.Name); err == nil || !strings.Contains(err.Error(), "PITR chain limit reached") {
 		t.Fatalf("capture error = %v", err)
+	}
+}
+
+func TestNativeRetentionCalendarKeepsChainPerPeriod(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	sep := retentionRecord(1, time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC), nil)
+	octEarly := retentionRecord(2, time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC), nil)
+	octLate := retentionRecord(3, time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC), nil)
+	// The October-early chain's newest log reaches into late October.
+	octLog := retentionRecord(4, time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC), &octEarly)
+	latest := retentionRecord(5, now, nil)
+	got, err := SelectCleanup([]Record{sep, octEarly, octLate, octLog, latest}, config.Retention{KeepMonthly: 2}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// November keeps latest; October keeps the chain with the newest recoverable
+	// point (octEarly through octLog), so octLate and September are removed.
+	names := map[string]bool{}
+	for _, r := range got {
+		names[r.Name] = true
+	}
+	if len(got) != 2 || !names[sep.Name] || !names[octLate.Name] {
+		t.Fatalf("unexpected native calendar cleanup: %v", got)
+	}
+}
+
+func TestNativeCleanupResolvesRetainedPendingDeletion(t *testing.T) {
+	ctx := context.Background()
+	store, err := local.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := Service{Store: store, Config: config.Config{Database: config.Database{Type: "mysql"}, Retention: config.Retention{KeepCount: 1}}}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "base.sql"), []byte("baseline"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	base, err := svc.publish(ctx, retentionRecord(1, now, nil), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tip, err := svc.publish(ctx, retentionRecord(2, now.Add(time.Minute), &base), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := tip.Name + ".pitr.json.deleting"
+	if err := store.Put(ctx, marker, strings.NewReader(tip.Name), int64(len(tip.Name))); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := svc.Cleanup(ctx, now, true)
+	if err != nil || len(deleted) != 0 {
+		t.Fatalf("preview: deleted=%d err=%v", len(deleted), err)
+	}
+	if exists, err := store.Exists(ctx, marker); err != nil || !exists {
+		t.Fatalf("preview changed marker: exists=%t err=%v", exists, err)
+	}
+	deleted, err = svc.Cleanup(ctx, now, false)
+	if err != nil || len(deleted) != 0 {
+		t.Fatalf("cleanup: deleted=%d err=%v", len(deleted), err)
+	}
+	if exists, err := store.Exists(ctx, marker); err != nil || exists {
+		t.Fatalf("retained marker not cleared: exists=%t err=%v", exists, err)
+	}
+	if err := store.Delete(ctx, base.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(ctx, marker, strings.NewReader(tip.Name), int64(len(tip.Name))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Cleanup(ctx, now, false); err == nil {
+		t.Fatal("cleanup accepted a retained chain with a missing base archive")
+	}
+	if exists, err := store.Exists(ctx, marker); err != nil || !exists {
+		t.Fatalf("unverified marker was cleared: exists=%t err=%v", exists, err)
 	}
 }

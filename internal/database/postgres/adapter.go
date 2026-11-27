@@ -122,7 +122,8 @@ func (a *Adapter) Preflight(ctx context.Context) (database.Info, error) {
 		return info, fault.Wrap(fault.Dependency, "parse pg_dump version", err)
 	}
 	if major != n/10000 {
-		return info, fault.Wrap(fault.Unsupported, "PostgreSQL version compatibility", fmt.Errorf("use pg_dump matching server major version %d", n/10000))
+		server := n / 10000
+		return info, fault.Wrap(fault.Unsupported, "PostgreSQL version compatibility", fmt.Errorf("pg_dump %d does not match server major version %d; use PostgreSQL %d client tools, such as the postgres%d DBVault image", major, server, server, server))
 	}
 	return info, nil
 }
@@ -181,4 +182,37 @@ func (a *Adapter) Compatible(target database.Info, sourceServer, sourceTool stri
 		return fmt.Errorf("pg_restore must be at least the source pg_dump major version")
 	}
 	return nil
+}
+
+// RowCountSQL counts every ordinary table and populated materialized view in
+// one statement, returning schema-qualified names and counts. Both the source
+// adapter and recovery drills use it so their names line up.
+const RowCountSQL = `SELECT format('%I.%I', n.nspname, c.relname), (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', n.nspname, c.relname), false, true, '')))[1]::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE (c.relkind = 'r' OR (c.relkind = 'm' AND c.relispopulated)) AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp%' ORDER BY 1`
+
+// RowCountArgs are the psql arguments that print RowCountSQL as NUL-separated pairs.
+var RowCountArgs = []string{"--no-psqlrc", "--no-password", "--quiet", "--tuples-only", "--no-align", "--field-separator-zero", "--record-separator-zero", "--set=ON_ERROR_STOP=1", "--command=BEGIN READ ONLY; " + RowCountSQL + "; COMMIT;"}
+
+// CountRows counts rows in a read-only transaction separate from pg_dump's
+// snapshot, so concurrent writes can make the counts differ from the dump.
+func (a *Adapter) CountRows(ctx context.Context) (map[string]int64, error) {
+	p, err := toolresolve.Resolve("psql", a.Config.Tools["psql"], a.Runner)
+	if err != nil {
+		return nil, err
+	}
+	out := &largeOutput{}
+	if err := a.Runner.Run(ctx, runner.Spec{Executable: p, Args: RowCountArgs, Env: a.env(), UnsetEnv: []string{"PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR"}, Stdout: out}); err != nil {
+		return nil, err
+	}
+	return database.ParsePairs(string(out.data))
+}
+
+// largeOutput bounds row count output (names and counts for many tables).
+type largeOutput struct{ data []byte }
+
+func (b *largeOutput) Write(p []byte) (int, error) {
+	if len(b.data)+len(p) > 1<<20 {
+		return 0, fmt.Errorf("row count output too large")
+	}
+	b.data = append(b.data, p...)
+	return len(p), nil
 }

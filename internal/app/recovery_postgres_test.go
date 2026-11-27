@@ -64,6 +64,8 @@ func (d *drillDocker) Run(ctx context.Context, s runner.Spec) error {
 			if d.failure == "cancel" {
 				return context.Canceled
 			}
+		case strings.Contains(joined, "--field-separator-zero"):
+			out = "public.fixture\x001\x00"
 		case strings.Contains(joined, "BEGIN READ ONLY"):
 			if d.failure == "validation" {
 				return errors.New("validation failed")

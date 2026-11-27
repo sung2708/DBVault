@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"github.com/sung2708/DBVault/internal/config"
 	"github.com/sung2708/DBVault/internal/database"
@@ -77,5 +78,36 @@ func TestSeries(t *testing.T) {
 		if _, err := Series(v); err == nil {
 			t.Fatal("unsupported version accepted", v)
 		}
+	}
+}
+
+func TestCountRowsWithHexNamesAndQuoting(t *testing.T) {
+	// Names with backticks and tabs survive batch escaping as hex.
+	names := []string{"or`ders", "line\titems"}
+	hexed := []string{}
+	for _, n := range names {
+		hexed = append(hexed, strings.ToUpper(hex.EncodeToString([]byte(n))))
+	}
+	var scripts []string
+	counts, err := CountRowsWith(context.Background(), func(_ context.Context, sql string) (string, error) {
+		scripts = append(scripts, sql)
+		if strings.HasPrefix(sql, "SELECT HEX(") {
+			return strings.Join(hexed, "\n") + "\n", nil
+		}
+		return hexed[0] + "\t7\n" + hexed[1] + "\t0\n", nil
+	})
+	if err != nil || counts["or`ders"] != 7 || counts["line\titems"] != 0 || len(counts) != 2 {
+		t.Fatal(counts, err)
+	}
+	if !strings.Contains(scripts[1], "FROM `or``ders`") {
+		t.Fatalf("table name not quoted: %s", scripts[1])
+	}
+	if _, err := CountRowsWith(context.Background(), func(_ context.Context, sql string) (string, error) {
+		if strings.HasPrefix(sql, "SELECT HEX(") {
+			return hexed[0] + "\n", nil
+		}
+		return "", nil
+	}); err == nil {
+		t.Fatal("incomplete count output accepted")
 	}
 }

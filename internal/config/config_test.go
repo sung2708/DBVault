@@ -137,3 +137,50 @@ func TestDocumentedExample(t *testing.T) {
 		})
 	}
 }
+
+const s3Example = `version: "1"
+database:
+  type: postgres
+  user: operator
+  database: original
+  password_env: TEST_DB_PASSWORD
+storage:
+  type: s3
+  s3:
+    bucket: backups
+    region: us-east-1
+`
+
+func TestS3ObjectLockPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		text  string
+		valid bool
+	}{
+		{"    protect_deletes: true\n    object_lock:\n      mode: COMPLIANCE\n      days: 30\n", true},
+		{"    protect_deletes: true\n    object_lock:\n      mode: GOVERNANCE\n      days: 1\n", true},
+		{"    object_lock:\n      mode: COMPLIANCE\n      days: 30\n", false},
+		{"    protect_deletes: true\n    object_lock:\n      mode: compliance\n      days: 30\n", false},
+		{"    protect_deletes: true\n    object_lock:\n      mode: GOVERNANCE\n      days: 0\n", false},
+		{"    protect_deletes: true\n    object_lock:\n      mode: GOVERNANCE\n      days: 36501\n", false},
+	} {
+		c, err := Load(write(t, s3Example+tc.text), Overrides{})
+		if (err == nil) != tc.valid {
+			t.Fatalf("%q: %+v %v", tc.text, c.Storage.S3.ObjectLock, err)
+		}
+	}
+}
+
+func TestCalendarRetentionPolicy(t *testing.T) {
+	c, err := Load(write(t, example+"retention:\n  keep_daily: 7\n  keep_weekly: 4\n  keep_monthly: 12\n  keep_yearly: 3\n"), Overrides{})
+	if err != nil || !c.Retention.Enabled() || c.Retention.KeepMonthly != 12 {
+		t.Fatalf("%+v %v", c.Retention, err)
+	}
+	if _, err := Load(write(t, example+"retention:\n  keep_weekly: -1\n"), Overrides{}); err == nil {
+		t.Fatal("negative calendar rule accepted")
+	}
+	weekly := 2
+	c, err = Load(write(t, example), Overrides{KeepWeekly: &weekly})
+	if err != nil || c.Retention.KeepWeekly != 2 {
+		t.Fatalf("override: %+v %v", c.Retention, err)
+	}
+}

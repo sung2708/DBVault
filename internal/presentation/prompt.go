@@ -11,8 +11,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/muesli/cancelreader"
 	"github.com/sung2708/DBVault/internal/onboarding"
 	"github.com/sung2708/DBVault/internal/security"
@@ -58,8 +59,15 @@ func (p *TerminalPrompter) run(ctx context.Context, field huh.Field) error {
 	return err
 }
 
-func (p *TerminalPrompter) theme() *huh.Theme {
-	theme := &huh.Theme{}
+// theme ignores the detected background: the palette uses basic ANSI colors
+// that the terminal itself maps for light and dark schemes.
+func (p *TerminalPrompter) theme() huh.Theme {
+	styles := p.themeStyles()
+	return huh.ThemeFunc(func(bool) *huh.Styles { return styles })
+}
+
+func (p *TerminalPrompter) themeStyles() *huh.Styles {
+	theme := &huh.Styles{}
 	theme.FieldSeparator = lipgloss.NewStyle().SetString("\n")
 	theme.Focused.SelectSelector = lipgloss.NewStyle().SetString("> ")
 	theme.Focused.ErrorIndicator = lipgloss.NewStyle().SetString("! ")
@@ -107,8 +115,26 @@ func (p *TerminalPrompter) SelectList(ctx context.Context, title, header string,
 	if height > 0 {
 		field.Height(height)
 	}
-	err := p.run(ctx, field)
+	err := p.run(ctx, pasteFilterSelect{field})
 	return value, err
+}
+
+// pasteFilterSelect refreshes filter matches after a paste. Huh v2 recomputes
+// them only on key presses, so a pasted backup name would not narrow the list
+// until another key arrived and Enter would pick the stale highlighted row.
+type pasteFilterSelect struct{ *huh.Select[string] }
+
+// refreshKey is bound by neither the select nor its filter input and carries
+// no text, so it only triggers the select's match recomputation.
+var refreshKey = tea.KeyPressMsg{Code: tea.KeyF63}
+
+func (s pasteFilterSelect) Update(msg tea.Msg) (huh.Model, tea.Cmd) {
+	_, cmd := s.Select.Update(msg)
+	if _, ok := msg.(tea.PasteMsg); ok {
+		_, refresh := s.Select.Update(refreshKey)
+		cmd = tea.Batch(cmd, refresh)
+	}
+	return s, cmd
 }
 
 // Huh filters the entire key. The width-limited first line is the visible row.
@@ -121,14 +147,14 @@ func (p *TerminalPrompter) backupSelect(title string, choices []onboarding.Choic
 		text, _, _ := strings.Cut(key, "\n")
 		return text
 	}
-	theme := p.theme()
+	theme := p.themeStyles()
 	theme.Focused.SelectedOption = theme.Focused.SelectedOption.Transform(label)
 	theme.Focused.UnselectedOption = theme.Focused.UnselectedOption.Transform(label)
 	theme.Blurred = theme.Focused
 	const hint = " (/ to filter)"
 	title = TruncateMiddle(p.clean(title), max(1, Detect(p.Out).Width-len(hint)-1), "...")
 	field := huh.NewSelect[string]().Title(title + hint).Options(options...).Value(value)
-	field.WithTheme(theme)
+	field.WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return theme }))
 	return field
 }
 

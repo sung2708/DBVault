@@ -1,26 +1,23 @@
 package presentation
 
-import (
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
-	"io"
-)
+import "charm.land/lipgloss/v2"
 
 type styles struct{ accent, success, warning, failure, muted lipgloss.Style }
 
+// newStyles returns basic ANSI styles, or unstyled ones that render plain text.
+// Lip Gloss v2 styles always emit their SGR sequences, so the color decision
+// made from the destination stream's capabilities is applied here.
 func newStyles(color bool) styles {
-	renderer := lipgloss.NewRenderer(io.Discard)
-	profile := termenv.Ascii
-	if color {
-		profile = termenv.ANSI
+	if !color {
+		plain := lipgloss.NewStyle()
+		return styles{accent: plain, success: plain, warning: plain, failure: plain, muted: plain}
 	}
-	renderer.SetColorProfile(profile)
 	return styles{
-		accent:  renderer.NewStyle().Bold(true).Foreground(lipgloss.Color("6")),
-		success: renderer.NewStyle().Foreground(lipgloss.Color("2")),
-		warning: renderer.NewStyle().Foreground(lipgloss.Color("3")),
-		failure: renderer.NewStyle().Bold(true).Foreground(lipgloss.Color("1")),
-		muted:   renderer.NewStyle().Foreground(lipgloss.Color("8")),
+		accent:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")),
+		success: lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
+		warning: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+		failure: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1")),
+		muted:   lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
 	}
 }
 func symbol(kind string, unicode bool) string {

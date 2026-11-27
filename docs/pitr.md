@@ -88,12 +88,15 @@ baselines during a maintenance window, then schedule incremental captures with
 no baseline interval. If no baseline exists, incremental backup attempts one
 and applies the same quiescence checks.
 
-Native cleanup uses `retention.keep_count` and `keep_days`, but counts complete
-baseline chains rather than individual log archives. Count and age protections
-are combined; the newest baseline for each engine/source identity is always kept,
+Native cleanup uses `retention.keep_count`, `keep_days` and the calendar rules
+(`keep_daily`, `keep_weekly`, `keep_monthly`, `keep_yearly`), but counts complete
+baseline chains rather than individual log archives. Calendar rules date each
+chain by its newest recoverable point. All protections are combined; the newest baseline for each engine/source identity is always kept,
 including all baselines tied at that timestamp.
 Age uses the newest range's coverage end, so an active chain is retained in full.
-Both zero disables deletion. Superseded whole chains are deleted child-first;
+Native health measures freshness from captured log ranges. A baseline alone
+waits for its first capture before it supplies point-in-time coverage.
+All rules at zero disable deletion. Superseded whole chains are deleted child-first;
 branches of a retained baseline are also retained. Rotate baselines regularly
 to let storage expire. Before starting new deletions, cleanup checks the stored
 checksum, authenticates encrypted archives and validates archive members for
@@ -105,7 +108,9 @@ or missing parents aborts new deletions.
 Cleanup failure reports that publication succeeded. Logical cleanup still
 manages only logical dumps. Native mutations and restores share an exclusive
 storage lock, `dbvault_pitr.lock`; inspect and remove a stale lock only after
-confirming its owner has stopped. Cleanup retries registered pending deletions.
+confirming its owner has stopped. Cleanup retries pending deletions selected by
+retention. If retention keeps a marked archive, cleanup verifies its recovery
+chain before clearing the marker.
 An unconfirmed manifest write preserves the archive for inspection. Never manually
 remove archives belonging to a recovery chain you need.
 

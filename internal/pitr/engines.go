@@ -303,10 +303,13 @@ func (s *Service) capture(ctx context.Context, parent string) (Record, error) {
 	if e != nil {
 		return Record{}, e
 	}
-	if len(chain) >= maxChainRecords {
+	return s.captureFrom(ctx, chain[len(chain)-1], len(chain))
+}
+
+func (s *Service) captureFrom(ctx context.Context, last Record, chainLength int) (Record, error) {
+	if chainLength >= maxChainRecords {
 		return Record{}, fmt.Errorf("PITR chain limit reached; create a new base")
 	}
-	last := chain[len(chain)-1]
 	pending, e := storage.DeletePending(ctx, s.Store, last.Name, ".pitr.json")
 	if e != nil {
 		return Record{}, e

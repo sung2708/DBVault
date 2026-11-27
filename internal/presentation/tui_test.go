@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sung2708/DBVault/internal/app"
 	"github.com/sung2708/DBVault/internal/metadata"
@@ -66,14 +66,14 @@ func TestBackupPickerFiltersByFullName(t *testing.T) {
 	picker := BackupChoices([]metadata.Manifest{{Name: "other.dump.gz"}, {Name: name}}, 80, true)
 	p := &TerminalPrompter{}
 	selected := picker.Choices[0].Value
-	field := p.backupSelect("Choose backup", picker.Choices, &selected)
+	field := pasteFilterSelect{p.backupSelect("Choose backup", picker.Choices, &selected)}
 	field.WithWidth(80)
 	field.WithKeyMap(huh.NewDefaultKeyMap())
 	field.Focus()
-	field.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	field.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(name), Paste: true})
-	field.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	field.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	field.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	field.Update(tea.PasteMsg{Content: name})
+	field.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	field.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if selected != name {
 		t.Fatalf("selected %q, want %q", selected, name)
 	}

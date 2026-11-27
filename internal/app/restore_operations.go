@@ -19,6 +19,8 @@ import (
 	"time"
 )
 
+const maxRestoreHistoryBytes = 1 << 20
+
 type RestoreRequest struct {
 	NewDatabase  bool
 	BackupBefore bool
@@ -146,7 +148,15 @@ func (s *Service) RestoreWithResult(ctx context.Context, key string, confirm, dr
 		}
 		result.RecordKey = "restore_history_" + result.StartedAt.Format("20060102_150405") + "_" + result.ID + ".json"
 		result.EvidenceStatus = "recorded"
-		b, e := json.Marshal(result)
+		record := result
+		b, e := json.Marshal(record)
+		if e == nil && len(b) > maxRestoreHistoryBytes && record.Backup.RowCounts != nil {
+			record.Backup.RowCounts = nil
+			b, e = json.Marshal(record)
+		}
+		if e == nil && len(b) > maxRestoreHistoryBytes {
+			e = fmt.Errorf("restore history record exceeds size limit")
+		}
 		if e == nil {
 			x, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
@@ -229,7 +239,7 @@ func (s *Service) RestoreWithResult(ctx context.Context, key string, confirm, dr
 	}
 	s.stage("restore.validation", "start")
 	if v, ok := s.DB.(database.RecoveryValidator); ok {
-		_, err = v.ValidateRecovery(ctx)
+		_, err = v.ValidateRecovery(ctx, false)
 		result.Validation = "structure_checked"
 	} else {
 		_, err = s.DB.Preflight(ctx)
@@ -243,26 +253,31 @@ func (s *Service) RestoreWithResult(ctx context.Context, key string, confirm, dr
 	return result, nil
 }
 
-func (s *Service) RestoreHistory(ctx context.Context) ([]RestoreResult, error) {
+func (s *Service) RestoreHistory(ctx context.Context, limit int) ([]RestoreResult, error) {
 	objects, err := s.Store.List(ctx, "restore_history_")
 	if err != nil {
 		return nil, err
 	}
+	sort.Slice(objects, func(i, j int) bool { return objects[i].Key > objects[j].Key })
 	results := []RestoreResult{}
+	var cutoffSecond string
 	for _, o := range objects {
 		if !strings.HasSuffix(o.Key, ".json") {
 			continue
+		}
+		if cutoffSecond != "" && !strings.HasPrefix(o.Key, cutoffSecond) {
+			break
 		}
 		r, e := s.Store.Get(ctx, o.Key)
 		if e != nil {
 			return nil, e
 		}
-		b, e := io.ReadAll(io.LimitReader(r, (1<<20)+1))
+		b, e := io.ReadAll(io.LimitReader(r, maxRestoreHistoryBytes+1))
 		r.Close()
 		if e != nil {
 			return nil, e
 		}
-		if len(b) > 1<<20 {
+		if len(b) > maxRestoreHistoryBytes {
 			return nil, fmt.Errorf("restore history record exceeds size limit")
 		}
 		var v RestoreResult
@@ -285,6 +300,9 @@ func (s *Service) RestoreHistory(ctx context.Context) ([]RestoreResult, error) {
 			return nil, fmt.Errorf("completed restore history lacks validation")
 		}
 		results = append(results, v)
+		if len(results) == limit {
+			cutoffSecond = "restore_history_" + v.StartedAt.UTC().Format("20060102_150405") + "_"
+		}
 	}
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].StartedAt.Equal(results[j].StartedAt) {
@@ -292,6 +310,9 @@ func (s *Service) RestoreHistory(ctx context.Context) ([]RestoreResult, error) {
 		}
 		return results[i].StartedAt.After(results[j].StartedAt)
 	})
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
 	return results, nil
 }
 
