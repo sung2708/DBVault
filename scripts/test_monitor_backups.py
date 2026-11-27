@@ -65,7 +65,7 @@ class FreshnessProbeTests(unittest.TestCase):
 class RealCLIProbeTests(unittest.TestCase):
     def test_registered_backups_without_producer_or_database(self):
         binary = os.environ["DBVAULT_MONITOR_BINARY"]
-        for case in ("fresh", "overdue", "empty", "storage", "native-fresh", "native-overdue", "native-other-source"):
+        for case in ("fresh", "overdue", "empty", "storage", "native-fresh", "native-overdue", "native-other-source", "native-baseline-only"):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
                 root = pathlib.Path(temp)
                 store = root / "storage"
@@ -98,6 +98,16 @@ class RealCLIProbeTests(unittest.TestCase):
                         if case == "native-other-source":
                             record["identity"] = "different-source"
                         suffix = ".pitr.json"
+                        if case != "native-baseline-only":
+                            baseline_at = (now - datetime.timedelta(hours=age + 1)).isoformat()
+                            record.update({"from": baseline_at, "until": baseline_at})
+                            (store / name).write_bytes(payload)
+                            (store / (name + suffix)).write_text(json.dumps(record))
+                            parent = record
+                            name = "pitr_00000000000000000000000000000002.tar.enc"
+                            record = dict(parent, name=name, kind="logs", parent=parent["name"],
+                                          parent_hash=parent["sha256"], start=parent["end"],
+                                          end="binlog.000002:4", until=at)
                     else:
                         name, suffix = "fixture.dump", ".meta.json"
                         record = dict(manifest_version="1.0", backup_id="fixture", backup_name=name, backup_type="full",
@@ -113,6 +123,8 @@ class RealCLIProbeTests(unittest.TestCase):
                 want = "warning" if case in ("fresh", "native-fresh") else ("unknown" if case == "storage" else "critical")
                 self.assertEqual(body["status"], want, raw.stderr.decode(errors="replace"))
                 self.assertEqual(raw.returncode, 1)
+                if case == "native-baseline-only":
+                    self.assertIn("waiting for the first log capture", body["databases"][0]["reason"])
                 result = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("monitor-backups.py")),
                                          "--dbvault", binary, "--config", str(config)], capture_output=True, timeout=45)
                 probe = json.loads(result.stdout)
