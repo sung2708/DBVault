@@ -40,7 +40,7 @@ func assertCloudRestoreOperations(t *testing.T, ctx context.Context, source *app
 	if e != nil || result.SafetyBackup == "" {
 		t.Fatal(result, e)
 	}
-	history, e := work.RestoreHistory(ctx)
+	history, e := work.RestoreHistory(ctx, 0)
 	if e != nil || len(history) != 2 {
 		t.Fatal(history, e)
 	}
@@ -129,7 +129,7 @@ func assertNewRestoreWorkflow(t *testing.T, ctx context.Context, source *app.Ser
 	if got := markerRows(t, ctx, rollback.DB, false); got != 1 {
 		t.Fatal("full safety backup lost destination-only table/collection", got)
 	}
-	history, e := work.RestoreHistory(ctx)
+	history, e := work.RestoreHistory(ctx, 0)
 	if e != nil || len(history) != 4 {
 		t.Fatal(history, e)
 	}
