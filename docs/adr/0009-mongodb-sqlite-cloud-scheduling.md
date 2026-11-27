@@ -2,6 +2,10 @@
 
 Status: Accepted — 2026-10-01
 
+The MongoDB restore tool rule below describes the original decision. The
+current development branch accepts the same or a newer patch in the archive's
+Database Tools 100.MINOR series. See [installation](../installation.md#33-mongodb-tools-mongodump-mongorestore).
+
 ## Decisions
 
 - The selected dependency versions require Go 1.26 or newer. Builds embed

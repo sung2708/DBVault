@@ -123,7 +123,7 @@ Phase 1 delivered an end-to-end backup and restore workflow for PostgreSQL to lo
 
 - [x] **MySQL Adapter:** Oracle MySQL 8.x/InnoDB dump/restore, matching release-series compatibility, and real Docker restore drills.
 - [x] **AWS S3 Storage Provider:** Official SDK multipart upload and conditional publication; LocalStack restore drills.
-- [x] **Retention Cleanup:** per-database keep_days/keep_count protections and dry-run.
+- [x] **Retention Cleanup:** per-database age, count and calendar protections with dry-run.
 - [x] **Dry-Run:** backup preflight and verified restore preflight.
 
 ---

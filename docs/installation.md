@@ -157,7 +157,12 @@ source ~/.zshrc
 
 ### 3.3 MongoDB Tools (`mongodump`, `mongorestore`)
 
-Install Database Tools 100.x; use the same tools version for dump and restore:
+Install the same Database Tools 100.x version for the local `mongodump` and
+`mongorestore` binaries. On the current development branch, restoring an existing
+archive allows the same or a newer patch in the archive's 100.MINOR series.
+The published `v0.9.2` requires an exact tools version match.
+
+Installation options:
 - **Ubuntu/Debian:** Install the official Database Tools package using
   [MongoDB's installation instructions](https://www.mongodb.com/docs/database-tools/installation/installation/).
 - **macOS:** `brew install mongodb-database-tools`

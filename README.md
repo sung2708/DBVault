@@ -606,8 +606,9 @@ dbvault cleanup --keep-days 30 --keep-count 7 --dry-run
 ```
 
 `cleanup` without `--dry-run` deletes candidates immediately; it has no confirmation
-flag. Age and count policies both protect backups, and the newest per database is
-always kept. Both policies set to zero disable deletion.
+flag. Age, count, and calendar rules combine. Cleanup keeps the newest backup
+and the newest whole-database backup per database, along with their dependencies.
+With all retention rules disabled, cleanup selects no backups for deletion.
 
 ### Scheduled Backups
 
